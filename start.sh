@@ -46,9 +46,9 @@ else
 fi
 
 # Start backend in background
-echo "[3/4] Iniciando backend FastAPI en http://localhost:8000 ..."
+echo "[3/4] Iniciando backend FastAPI en http://127.0.0.1:8000 ..."
 cd "$BACKEND"
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload &
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
 BACKEND_PID=$!
 
 # ---- Frontend ----

@@ -17,5 +17,5 @@ export const getPositions = (filters: PositionFilters = {}) =>
 
 export const exportPositions = (filters: PositionFilters = {}) => {
   const params = new URLSearchParams(filters as any).toString();
-  window.open(`http://localhost:8000/api/positions/export?${params}`, '_blank');
+  window.open(`http://127.0.0.1:8000/api/positions/export?${params}`, '_blank');
 };
