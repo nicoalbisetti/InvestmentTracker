@@ -1,0 +1,177 @@
+# FEATURE: Histórico de Posiciones — Vista Mensual y Anual
+
+## Paso 0 — Antes de cualquier otra cosa
+
+1. Copiar este archivo de spec al repositorio:
+   ```bash
+   mkdir -p docs/specs
+   cp prompt_historico_posiciones.txt docs/specs/prompt_historico_posiciones.txt
+   git add docs/specs/prompt_historico_posiciones.txt
+   git commit -m "docs: add spec for histórico de posiciones feature"
+   git push
+   ```
+2. Recién después continuar con los pasos siguientes.
+
+---
+
+## Convención de trabajo obligatoria
+
+Antes de escribir cualquier código, crear el archivo `TASKS.md` en la raíz del proyecto con todos los pasos como checkboxes. Marcar cada tarea como completada a medida que avanza. No proceder al siguiente paso sin completar el anterior.
+
+### Actualización de tareas en ClickUp
+
+A medida que se completa cada tarea, marcarla como completada en ClickUp usando la herramienta MCP de ClickUp. Los IDs de las tareas son:
+
+| Tarea | ID ClickUp |
+|---|---|
+| Paso 0 — Commitear spec a GitHub | `86e0p711d` |
+| Backend — Endpoints /api/history/monthly y /api/history/annual | `86e0p6emk` |
+| Frontend — Crear frontend/src/api/history.ts | `86e0p6erh` |
+| Frontend — Crear página History.tsx | `86e0p6f3p` |
+| Frontend — Registrar ruta /history y agregar al sidebar | `86e0p6f92` |
+| QA — Verificar criterios de aceptación | `86e0p6fgx` |
+
+Al completar cada tarea ejecutar via MCP ClickUp:
+```
+clickup_update_task(task_id="<ID>", status="complete")
+```
+
+---
+
+## Contexto del sistema
+
+Stack: FastAPI + SQLAlchemy + SQLite (backend), React 18 + TypeScript + Vite + Tailwind + Recharts (frontend).
+
+El modelo de datos relevante es `MonthlyPosition` (`backend/app/models/monthly_position.py`):
+- `instrument_id` (FK → Instrument)
+- `date` (normalizado al día 1 del mes)
+- `balance_brl` (Float)
+- `balance_usd` (Float)
+- UNIQUE constraint: `(instrument_id, date)`
+
+El modelo `Instrument` tiene campos: `id`, `name`, `custodian`, `type`, `status`.
+
+La página de Proventos (`frontend/src/pages/Proventos.tsx`) sirve como referencia visual para la estructura de tabla esperada: instrumentos en filas, períodos en columnas.
+
+---
+
+## Objetivo
+
+Crear una nueva página **Histórico** (`/history`) que permita visualizar el saldo histórico de todos los instrumentos en dos vistas intercambiables:
+
+1. **Vista Mensual**: columnas = 12 meses del año seleccionado (Ene–Dic)
+2. **Vista Anual**: columnas = últimos 10 años disponibles en la base de datos
+
+En ambas vistas, el usuario puede alternar entre ver los valores en **BRL** o **USD** mediante un toggle.
+
+La página reemplaza o convive con cualquier ruta `/history` existente — verificar el router actual (`frontend/src/App.tsx` o equivalente) y reemplazar sin romper la navegación del sidebar.
+
+---
+
+## Backend
+
+### Nuevo archivo: `backend/app/routers/history.py`
+
+Crear dos endpoints nuevos. Si ya existe un router `history.py`, agregar los endpoints sin eliminar los existentes.
+
+#### `GET /api/history/monthly`
+
+Parámetros query:
+- `year: int` (requerido) — año a mostrar
+- `currency: str` (default `"BRL"`) — `"BRL"` o `"USD"`
+- `custodian: str` (opcional) — filtrar por custodio exacto (ej: `"XP"`, `"Santander"`)
+- `type: str` (opcional) — filtrar por tipo de instrumento (ej: `"renta_fija"`, `"accion"`, `"fii"`, `"exterior"`)
+- `market: str` (opcional) — `"brasil"` o `"exterior"`. Si se provee, filtrar: `"brasil"` incluye todos los tipos excepto `"exterior"`; `"exterior"` incluye solo `type = "exterior"`
+
+Lógica:
+1. Obtener todos los instrumentos con al menos una posición en ese año (status no filtra — mostrar activos y cerrados si tienen datos en ese año)
+2. Aplicar filtros `custodian`, `type` y `market` sobre los instrumentos **antes** de consultar posiciones
+3. Para cada instrumento filtrado, obtener sus `MonthlyPosition` donde `date` está entre `{year}-01-01` y `{year}-12-01` inclusive
+4. Construir respuesta: una fila por instrumento, con valores para los 12 meses (null si no hay dato)
+5. Los `totals` reflejan solo los instrumentos que pasaron los filtros
+
+Respuesta JSON:
+```json
+{
+  "year": 2024,
+  "currency": "BRL",
+  "months": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+  "items": [
+    {
+      "instrument_id": 42,
+      "name": "CDB XP 110% CDI",
+      "custodian": "XP",
+      "type": "renta_fija",
+      "values": [10000.0, 10200.0, null, 10500.0, ...]
+    }
+  ],
+  "totals": [120000.0, 121500.0, null, ...]
+}
+```
+
+#### `GET /api/history/annual`
+
+Parámetros query:
+- `currency: str` (default `"BRL"`) — `"BRL"` o `"USD"`
+- `custodian: str` (opcional)
+- `type: str` (opcional)
+- `market: str` (opcional)
+
+Lógica:
+1. Determinar los últimos 10 años con datos disponibles en `MonthlyPosition`
+2. Aplicar filtros
+3. Para cada instrumento, tomar el valor de diciembre (`{year}-12-01`). Si no hay diciembre, usar el último mes disponible del año
+4. Si no hay ningún dato en ese año, el valor es null
+
+Respuesta JSON:
+```json
+{
+  "currency": "BRL",
+  "years": [2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015],
+  "items": [
+    {
+      "instrument_id": 42,
+      "name": "CDB XP 110% CDI",
+      "custodian": "XP",
+      "type": "renta_fija",
+      "values": [11000.0, 10000.0, null, 8500.0, ...]
+    }
+  ],
+  "totals": [350000.0, 320000.0, ...]
+}
+```
+
+---
+
+## Frontend
+
+### `frontend/src/api/history.ts`
+### `frontend/src/pages/History.tsx`
+
+Layout: barra de controles (toggle vista, año, moneda, filtros) + tabla scrollable + fila totales.
+
+Comportamiento:
+- Cualquier cambio de filtro → refetch
+- Toggle BRL/USD → refetch
+- Cambio de año → refetch
+- Filtro Tipo activo → deshabilitar Mercado
+- Filtro Mercado=Exterior → limpiar Tipo y deshabilitarlo
+- Botón "Limpiar filtros" cuando hay filtros activos
+
+Formato de valores:
+- BRL: `R$ 10.500` (sin centavos)
+- USD: `US$ 10,500` (sin centavos)
+- null o 0: `—` en gris
+
+---
+
+## Criterios de aceptación
+
+- [ ] GET /api/history/monthly retorna estructura correcta
+- [ ] GET /api/history/annual retorna estructura correcta
+- [ ] Filtros custodian, type, market funcionan
+- [ ] Toggle BRL/USD actualiza tabla
+- [ ] Selector año actualiza tabla (vista mensual)
+- [ ] Fila totales suma correctamente
+- [ ] Tabla scrollable horizontalmente
+- [ ] Ítem de navegación lleva a /history
