@@ -1,0 +1,503 @@
+=============================================================================
+INVESTMENT TRACKER — OPERACIONES DE RENTA VARIABLE
+Especificacion completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Antes de escribir cualquier linea de codigo, completar los siguientes pasos
+en orden:
+
+  PASO 0 — Setup de seguimiento
+  ------------------------------
+
+  a) Commitear este archivo de spec al repositorio:
+       mkdir -p docs/specs
+       cp prompt_operaciones_renta_variable.txt docs/specs/
+       git add docs/specs/prompt_operaciones_renta_variable.txt
+       git commit -m "docs: add spec for operaciones de renta variable"
+       git push
+
+  Recien despues de completar el PASO 0 continuar con el desarrollo.
+
+  CONVENCION DURANTE EL DESARROLLO
+  ----------------------------------
+  A medida que se completa cada tarea:
+    1. Marcarla en TASKS.md:  [ ] -> [x]
+    2. Marcarla como completada en ClickUp:
+         clickup_update_task(task_id="<ID>", status="complete")
+
+  PASO FINAL — Al terminar toda la implementacion
+  -------------------------------------------------
+  Una vez que todos los criterios de aceptacion (seccion 11) esten
+  verificados, ejecutar en orden:
+
+  a) Commit del codigo:
+       git add -A
+       git commit -m "feat: operaciones de renta variable (equity trades)
+
+       - Nueva tabla equity_trades con modelo SQLAlchemy
+       - Servicio equity_recalculate: recalculo de MonthlyPosition
+         desde fecha de operacion en adelante
+       - Router /api/equity-trades (CRUD + summary)
+       - Frontend: pagina /equity-trades con formulario, historial y
+         card de resumen P&L
+       - Integracion en Positions: columnas Cantidad y P. Prom. Compra"
+       git push
+
+  b) Actualizar PLAN.md:
+       En la seccion "Fase 4 — Frontend resto de paginas" (o crear
+       "Fase 7 — Features adicionales" si no existe), agregar:
+         - [x] Operaciones de Renta Variable — registro de compras/ventas,
+               recalculo de posiciones, historial con P&L
+
+  c) Actualizar CONTEXT.md:
+       - En la seccion de modelos de base de datos, agregar la tabla
+         equity_trades con sus campos.
+       - En la seccion de endpoints implementados, agregar la seccion
+         /api/equity-trades con todos sus endpoints.
+       - Si existe una seccion de paginas del frontend, agregar
+         /equity-trades (EquityTrades.tsx).
+
+
+=============================================================================
+1. RESUMEN DE LA FUNCIONALIDAD
+=============================================================================
+
+Agregar al sistema la capacidad de registrar compras y ventas de instrumentos
+de renta variable (acciones, FIIs, ETFs). Al registrar una operacion, el
+sistema debe:
+
+  - Calcular automaticamente el impacto en la cantidad total del instrumento
+    desde la fecha de la operacion en adelante.
+  - Actualizar el saldo en BRL de las MonthlyPosition correspondientes
+    multiplicando la nueva cantidad por el precio unitario de cada mes.
+  - Permitir indicar la fecha exacta de la operacion. Las posiciones de meses
+    anteriores a esa fecha NO se modifican.
+  - Mostrar el historial de operaciones por instrumento con capacidad de
+    edicion y eliminacion.
+
+
+=============================================================================
+2. CONTEXTO DEL SISTEMA EXISTENTE
+=============================================================================
+
+--- 2.1 Tabla MonthlyPosition ---
+
+Cada fila representa el estado de un instrumento en un mes calendario.
+Campos relevantes para esta feature:
+
+  quantity        Float, nullable  Cantidad de unidades al cierre del mes
+  unit_price      Float, nullable  Precio unitario al cierre del mes
+  balance_brl     Float, nullable  Saldo en BRL. Para renta variable:
+                                   balance_brl = quantity x unit_price
+  balance_usd     Float, nullable  Saldo en USD (si aplica)
+  avg_price       Float, nullable  Precio promedio de compra (costo,
+                                   no precio de mercado)
+
+UNIQUE constraint existente: (instrument_id, date, custodian_override)
+
+
+--- 2.2 Tabla Instrument ---
+
+Campos relevantes:
+
+  type      accion | fii | outro...   Esta feature opera principalmente
+                                      sobre accion y fii
+  ticker    String, nullable          Codigo de bolsa (PETR4, XPML11, etc.)
+  currency  BRL | USD                 Moneda base del instrumento
+  status    activo | cerrado | ...    Estado del instrumento
+
+
+--- 2.3 Tabla Transaction (existente — NO modificar) ---
+
+Esta tabla registra flujos de capital (aplicacion, rescate, provento, outro).
+Su logica de recalculo es balance_mes = balance_anterior + aplicaciones -
+rescates, que es inadecuada para renta variable.
+
+Por este motivo las compras y ventas de equities van en una tabla nueva y
+separada (equity_trades). NO agregar tipos compra/venta a Transaction.
+
+
+=============================================================================
+3. NUEVA TABLA: equity_trades
+=============================================================================
+
+--- 3.1 Modelo SQLAlchemy ---
+
+Crear backend/app/models/equity_trade.py con el siguiente modelo:
+
+  id              Integer, PK, autoincrement          NO nullable
+  instrument_id   Integer, FK instruments.id, indexed NO nullable
+  date            Date, indexed                       NO nullable
+                  Fecha exacta de la operacion
+  trade_type      String(10)                          NO nullable
+                  Valores: "compra" | "venta"
+  quantity        Float                               NO nullable
+                  Cantidad de unidades. Siempre positivo.
+  price           Float                               NO nullable
+                  Precio unitario en BRL (o USD si currency=USD)
+  amount_brl      Float                               SI nullable
+                  Monto total en BRL. Si es null al guardar, calcular
+                  como quantity x price.
+  notes           Text                                SI nullable
+  created_at      DateTime                            NO nullable
+
+No aplica UNIQUE constraint. Se permiten multiples operaciones del mismo
+instrumento en el mismo dia.
+
+
+--- 3.2 Schemas Pydantic ---
+
+Crear backend/app/schemas/equity_trade.py:
+
+EquityTradeCreate:
+  instrument_id : int
+  date          : date
+  trade_type    : Literal["compra", "venta"]
+  quantity      : float   # validar > 0
+  price         : float   # validar > 0
+  notes         : str | None = None
+
+EquityTradeUpdate:
+  date          : date | None
+  trade_type    : Literal["compra", "venta"] | None
+  quantity      : float | None
+  price         : float | None
+  notes         : str | None
+
+EquityTradeOut:
+  id, instrument_id, date, trade_type, quantity, price,
+  amount_brl, notes, created_at
+  instrument_name   : str          # join con Instrument
+  instrument_ticker : str | None
+
+
+=============================================================================
+4. LOGICA DE RECALCULO DE POSICIONES
+=============================================================================
+
+--- 4.1 Principio General ---
+
+Cuando se crea, edita o elimina un EquityTrade, el sistema recalcula las
+MonthlyPosition del instrumento afectado desde el mes de la operacion en
+adelante. Las posiciones de meses anteriores NO se tocan.
+
+
+--- 4.2 Funcion de Recalculo ---
+
+Crear backend/app/services/equity_recalculate.py con la funcion:
+
+  recalculate_equity_positions(instrument_id: int, from_date: date, db: Session)
+
+Logica paso a paso:
+
+  1. Normalizar from_date al primer dia de su mes -> from_month.
+
+  2. Obtener todas las MonthlyPosition del instrumento con date >= from_month,
+     ordenadas ASC por date.
+
+  3. Para cada mes a procesar:
+
+     a. quantity_acumulada =
+          SUM(quantity de trades tipo "compra" con date <= ultimo_dia_del_mes)
+          - SUM(quantity de trades tipo "venta" con date <= ultimo_dia_del_mes)
+        Considerar TODOS los trades del instrumento, no solo los del mes.
+
+     b. Actualizar mp.quantity = quantity_acumulada
+
+     c. Si mp.unit_price no es null:
+          actualizar mp.balance_brl = quantity_acumulada x mp.unit_price
+        Si mp.unit_price es null:
+          dejar mp.balance_brl sin cambios
+
+     d. Calcular avg_price (ver 4.3) y actualizar mp.avg_price
+
+  4. Commit de todos los cambios en una sola transaccion de BD.
+
+IMPORTANTE: Si quantity_acumulada resulta negativa (venta sin compra previa),
+loguear un warning pero NO lanzar excepcion. Guardar igual; la UI mostrara
+un indicador visual.
+
+
+--- 4.3 Precio Promedio de Compra (avg_price) ---
+
+Usar precio promedio ponderado movil:
+
+  avg_price_del_mes = SUM(qty_compra_i x price_i para todas las compras
+                          con date <= ultimo_dia_del_mes)
+                      / SUM(qty_compra_i)
+
+  - Solo se consideran operaciones de tipo "compra".
+  - Las ventas no modifican el avg_price.
+  - Si no hay compras: avg_price = null.
+
+
+--- 4.4 Trigger de Recalculo ---
+
+  Evento                          from_date para recalculo
+  --------------------------------------------------------------
+  POST /equity-trades             date de la nueva operacion
+  PUT  /equity-trades/{id}        min(date_anterior, date_nueva)
+  DELETE /equity-trades/{id}      date de la operacion eliminada
+
+
+=============================================================================
+5. ENDPOINTS DE LA API
+=============================================================================
+
+Crear backend/app/routers/equity_trades.py.
+Registrar en main.py bajo el prefijo /api/equity-trades.
+
+
+  GET    /api/equity-trades/
+    Lista paginada.
+    Query params: instrument_id (filtro opcional), date_from, date_to,
+                  trade_type, page, limit (default 50)
+    Retorna: { items: EquityTradeOut[], total: int, page: int, pages: int }
+
+  POST   /api/equity-trades/
+    Crea una nueva operacion y dispara recalculo.
+    Body: EquityTradeCreate
+    Retorna: EquityTradeOut + { recalculated_months: int, affected_from: str }
+
+  GET    /api/equity-trades/{id}
+    Detalle de una operacion.
+    Retorna: EquityTradeOut
+
+  PUT    /api/equity-trades/{id}
+    Edita una operacion y dispara recalculo desde min(date_ant, date_nueva).
+    Body: EquityTradeUpdate
+    Retorna: EquityTradeOut + { recalculated_months: int, affected_from: str }
+
+  DELETE /api/equity-trades/{id}
+    Elimina la operacion y dispara recalculo desde su fecha.
+    Status 204
+
+  GET    /api/equity-trades/summary/{instrument_id}
+    Resumen del instrumento. Retorna:
+      instrument_id         : int
+      instrument_name       : str
+      instrument_ticker     : str | None
+      total_compras_qty     : float
+      total_ventas_qty      : float
+      qty_actual            : float  (total_compras - total_ventas)
+      avg_price_compra      : float | None
+      ultimo_precio         : float | None  (unit_price del mp mas reciente)
+      pl_no_realizado       : float | None  (qty x ultimo_precio - qty x avg_price)
+      pl_no_realizado_pct   : float | None
+
+
+=============================================================================
+6. MIGRACION DE BASE DE DATOS
+=============================================================================
+
+El sistema usa SQLite con creacion automatica de tablas. Agregar EquityTrade
+al Base.metadata.create_all en backend/app/database.py (o donde corresponda).
+
+Si ya hay datos en produccion, crear tambien:
+
+  backend/migrations/add_equity_trades.py
+
+El script debe ser idempotente (no falla si la tabla ya existe).
+Ejecutar manualmente: python migrations/add_equity_trades.py
+
+
+=============================================================================
+7. FRONTEND
+=============================================================================
+
+--- 7.1 Nueva Pagina: /equity-trades ---
+
+Crear frontend/src/pages/EquityTrades.tsx.
+Registrar ruta en el router.
+Agregar al sidebar con icono TrendingUp (lucide-react), label "Operaciones".
+
+La pagina tiene dos secciones:
+
+
+SECCION SUPERIOR — Formulario de nueva operacion
+-------------------------------------------------
+Titulo: "Nueva Operacion"
+
+Campos:
+  Instrumento    Autocomplete sobre todos los instrumentos activos.
+                 Mostrar ticker + nombre. Sin restriccion de tipo.
+  Tipo           Toggle o radio: Compra / Venta
+  Fecha          Date picker, default hoy
+  Cantidad       Input numerico. Formato brasileno (punto=miles, coma=decimal)
+  Precio (BRL)   Input numerico. Formato brasileno
+  Monto total    Campo calculado read-only: Cantidad x Precio.
+                 Actualizar en tiempo real mientras el usuario escribe.
+  Notas          Textarea opcional
+
+Boton: "Registrar Operacion" -> POST /api/equity-trades/
+
+Al exito:
+  - Limpiar formulario
+  - Toast: "Operacion registrada. X meses recalculados desde YYYY-MM"
+  - Refrescar tabla de historial (invalidar query)
+
+
+SECCION INFERIOR — Historial de operaciones
+--------------------------------------------
+Filtros: selector de instrumento (opcional), rango de fechas,
+         tipo (compra / venta / todos)
+
+Tabla con columnas:
+  Fecha | Instrumento | Tipo | Cantidad | Precio Unit. | Monto Total | Notas | Acciones
+
+  - Tipo: badge verde para Compra, rojo para Venta
+  - Acciones: botones Editar y Eliminar
+  - Ordenable por Fecha (default DESC) e Instrumento
+  - Paginacion: 50 registros por pagina
+
+Cuando el usuario selecciona un instrumento en el filtro, mostrar debajo
+del filtro la card de resumen (ver 7.3).
+
+
+--- 7.2 Modal de Edicion ---
+
+Al hacer click en Editar: abrir Dialog (shadcn/ui) con el mismo formulario
+pre-cargado. Al guardar: PUT /api/equity-trades/{id}.
+
+
+--- 7.3 Confirmacion de Eliminacion ---
+
+Al hacer click en Eliminar: AlertDialog con el mensaje:
+"Eliminar esta operacion? Las posiciones seran recalculadas desde [fecha]
+en adelante."
+Al confirmar: DELETE /api/equity-trades/{id}.
+
+
+--- 7.4 Card de Resumen por Instrumento ---
+
+Componente: frontend/src/components/EquityTradeSummaryCard.tsx
+
+Datos: GET /api/equity-trades/summary/{instrument_id}
+
+Mostrar:
+  - Cantidad actual poseida
+  - Precio promedio de compra
+  - Ultimo precio registrado
+  - P&L no realizado en BRL y en %
+
+Color: verde si P&L positivo, rojo si negativo.
+Si qty_actual resulta negativa: badge rojo "Cantidad negativa".
+
+
+--- 7.5 Archivo de API ---
+
+Crear frontend/src/api/equityTrades.ts con las funciones:
+
+  getEquityTrades(params)             -> Promise<PaginatedResult<EquityTradeOut>>
+  createEquityTrade(data)             -> Promise<EquityTradeOut & RecalcInfo>
+  updateEquityTrade(id, data)         -> Promise<EquityTradeOut & RecalcInfo>
+  deleteEquityTrade(id)               -> Promise<void>
+  getEquityTradeSummary(instrumentId) -> Promise<EquityTradeSummary>
+
+
+=============================================================================
+8. INTEGRACION CON PAGINAS EXISTENTES
+=============================================================================
+
+--- 8.1 Pagina Posiciones (/positions) ---
+
+Para instrumentos de tipo accion y fii agregar:
+  - Columna "Cantidad" (campo quantity de MonthlyPosition — verificar que
+    ya se muestre; si no, agregarlo)
+  - Columna "P. Prom. Compra" (avg_price del mp mas reciente del instrumento)
+  - En el menu de acciones de cada fila: link "Ver operaciones" que navega
+    a /equity-trades?instrument_id={id}
+
+--- 8.2 Resto de paginas ---
+
+Dashboard, Historia, Anual y Proventos consumen balance_brl de
+MonthlyPosition, que se actualiza automaticamente con el recalculo.
+No requieren modificaciones.
+
+
+=============================================================================
+9. CASOS BORDE Y VALIDACIONES
+=============================================================================
+
+Venta con qty mayor a la poseida:
+  Guardar sin bloquear. MonthlyPosition queda con quantity negativa.
+  Mostrar badge "Cantidad negativa" en la tabla y en la card de resumen.
+
+Operacion en fecha futura:
+  Permitir. El recalculo solo afecta meses que ya existen en
+  MonthlyPosition; los futuros no se crean.
+
+Instrumento sin MonthlyPosition en el mes de la operacion:
+  El recalculo solo actualiza filas existentes. Si no existe el mes, no
+  crearlo. Loguear info en consola.
+
+Edicion de fecha de una operacion:
+  Disparar recalculo desde min(fecha_anterior, fecha_nueva).
+
+Instrumento con currency=USD:
+  price se ingresa en USD. Para calcular amount_brl usar la tasa usd_brl
+  del Quote mas cercano a la fecha de la operacion.
+  balance_brl en MonthlyPosition sigue calculandose como quantity x unit_price
+  (donde unit_price en mp ya esta en BRL).
+
+Dos operaciones el mismo dia:
+  Ambas se guardan. El recalculo las acumula correctamente porque suma
+  todos los trades hasta el ultimo dia del mes.
+
+
+=============================================================================
+10. ARCHIVOS A CREAR O MODIFICAR
+=============================================================================
+
+NUEVOS:
+  backend/app/models/equity_trade.py
+  backend/app/schemas/equity_trade.py
+  backend/app/routers/equity_trades.py
+  backend/app/services/equity_recalculate.py
+  backend/migrations/add_equity_trades.py
+  frontend/src/api/equityTrades.ts
+  frontend/src/pages/EquityTrades.tsx
+  frontend/src/components/EquityTradeForm.tsx
+       (formulario reutilizado en pagina y en modal de edicion)
+  frontend/src/components/EquityTradeSummaryCard.tsx
+
+MODIFICAR:
+  backend/app/main.py
+       Importar y registrar router equity_trades
+  backend/app/database.py (o equivalente)
+       Incluir EquityTrade en Base.metadata.create_all
+  frontend/src/App.tsx (o router)
+       Agregar ruta /equity-trades -> EquityTrades
+  frontend/src/components/Sidebar.tsx (o equivalente)
+       Agregar item "Operaciones" con icono TrendingUp
+  frontend/src/pages/Positions.tsx
+       Columnas Cantidad y P. Prom. Compra para accion/fii
+       Link "Ver operaciones" en menu de fila
+
+
+=============================================================================
+11. CRITERIOS DE ACEPTACION
+=============================================================================
+
+1. Se puede registrar una compra de 100 acciones de PETR4 a R$38,50 el
+   15/03/2025.
+2. Despues de registrar, las MonthlyPosition de PETR4 desde marzo 2025
+   en adelante tienen quantity = 100 (o qty_previa + 100).
+3. Si esas MonthlyPosition tienen unit_price, balance_brl se actualiza
+   a quantity x unit_price.
+4. Se puede registrar una venta de 50 acciones el 10/06/2025. Las
+   posiciones desde junio 2025 muestran quantity = 50.
+5. Las posiciones anteriores a marzo 2025 NO cambian.
+6. Se puede editar la cantidad de la compra. Las posiciones se recalculan.
+7. Se puede eliminar una operacion. Las posiciones se recalculan.
+8. El summary muestra qty_actual = 50, avg_price correcto, y P&L si hay
+   precio disponible.
+9. La card muestra badge rojo si la cantidad resultante es negativa.
+10. El toast de confirmacion indica cuantos meses fueron recalculados.
+
+
+=============================================================================
+FIN DE LA ESPECIFICACION
+=============================================================================
