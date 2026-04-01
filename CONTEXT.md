@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 1 Abr 2026.
+> Refleja el estado REAL del código al 1 Abr 2026 (tarde).
 
 ---
 
@@ -479,9 +479,11 @@ Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL.
 
 ### History (`/history`)
 Matriz Histórico: tabla instrumento × período (vista Mensual o Anual). Toggle BRL/USD, selector de año,
-filtros por custodio/tipo/mercado con limpiar filtros, fila de totales, scroll horizontal.
+filtros por custodio/tipo/mercado con limpiar filtros, scroll horizontal.
 Vista Mensual: 12 columnas (Ene–Dic) para el año seleccionado.
 Vista Anual: hasta 10 columnas (últimos años con datos, valor de diciembre o último mes disponible).
+Comportamiento: filas ordenadas por mercado (brasil→exterior) y tipo (TYPE_ORDER); celdas en verde si
+el valor aumentó vs el período anterior; filas sin ningún valor ocultas; fila de totales fija arriba (en thead).
 Nota: también existe endpoint legacy para historial de un instrumento (`/api/history/{id}`) usado internamente.
 **API:** `/api/history/monthly`, `/api/history/annual`, `/api/history/{id}`, `/api/history/compare`
 
@@ -636,7 +638,20 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 
 ---
 
-## 11. Notas Importantes para Futuros Features
+## 11. Convención de Trabajo — PASO 0
+
+Antes de escribir cualquier código para una nueva feature, siempre ejecutar:
+
+a) Crear `TASKS.md` en la raíz con todas las tareas en checkboxes
+b) Crear lista en ClickUp dentro del folder InvestmentTracker (`folder_id: 90177874339`) con `clickup_create_list_in_folder`
+c) Crear una tarea en ClickUp por cada item del TASKS.md con `clickup_create_task`
+d) Recién después iniciar el desarrollo; marcar tareas como completadas a medida que avanza
+
+Esto está documentado en `.claude/CLAUDE.md`.
+
+---
+
+## 12. Notas Importantes para Futuros Features
 
 ### Sin Alembic — migraciones manuales
 No hay Alembic. Para cambiar schema:
