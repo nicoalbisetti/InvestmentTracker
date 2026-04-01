@@ -74,6 +74,7 @@ def get_monthly_history(
             "name": inst.name,
             "custodian": inst.custodian,
             "type": inst.type,
+            "location": inst.location,
             "values": values,
         })
 
@@ -165,6 +166,7 @@ def get_annual_history(
             "name": inst.name,
             "custodian": inst.custodian,
             "type": inst.type,
+            "location": inst.location,
             "values": [get_annual_value(inst.id, y) for y in years],
         })
 
