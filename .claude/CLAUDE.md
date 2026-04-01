@@ -29,3 +29,20 @@ c) Crear en esa lista una tarea por cada item del TASKS.md usando
 
 d) Recién después de completar a), b) y c), iniciar el desarrollo.
    Marcar cada tarea como completada en ClickUp a medida que avanza.
+
+---
+
+## PASO FINAL — Actualización de documentación obligatoria
+
+Al terminar cualquier feature o conjunto de cambios, siempre actualizar:
+
+1. `CONTEXT.md` en la raíz del proyecto:
+   - Actualizar la descripción de la página afectada en la sección "Páginas del Frontend"
+   - Actualizar o agregar endpoints en la sección "Endpoints Implementados"
+   - Agregar el feature a la sección "Features Implementados" si corresponde
+   - Actualizar la fecha del documento
+
+2. `PLAN.md` en la raíz del proyecto:
+   - Marcar como completada la tarea correspondiente si figura en las Fases de Desarrollo
+
+3. Hacer commit de los cambios de documentación junto con (o inmediatamente después de) el commit del código.
