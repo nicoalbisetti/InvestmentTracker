@@ -194,7 +194,7 @@ GET  /api/import/history              # Historial de importaciones
 |--------|------|-------------|
 | Dashboard | `/` | KPIs, grafico evolucion, donut distribucion, top/bottom 5 |
 | Posiciones | `/positions` | Tabla ranking con filtros y sort |
-| Evolucion | `/history` | Graficos multi-instrumento + metricas CAGR |
+| Histórico | `/history` | Matriz instrumento × período (mensual/anual), filtros custodio/tipo/mercado, toggle BRL/USD |
 | Anual | `/annual` | Tabla + grafico barras apiladas |
 | Proventos | `/proventos` | Tabla + grafico mensual + proyeccion |
 | Transacciones | `/transactions` | CRUD transacciones manuales |

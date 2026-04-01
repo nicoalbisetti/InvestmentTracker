@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 31 Mar 2026.
+> Refleja el estado REAL del código al 1 Abr 2026.
 
 ---
 
@@ -389,6 +389,8 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/{instrument_id}?date_from&date_to` | Historial de posiciones + métricas |
 | GET | `/compare?ids=1,2,3` | Comparación multi-instrumento |
+| GET | `/monthly?year&currency&custodian&type&market` | Matriz mensual: instrumentos × 12 meses con totals |
+| GET | `/annual?currency&custodian&type&market` | Matriz anual: instrumentos × últimos 10 años con totals |
 
 ### `/api/annual`
 | Método | Ruta | Descripción |
@@ -476,8 +478,12 @@ Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL.
 **API:** `/api/positions`, `/api/positions/export`, `/api/positions/update-equities-prices`, etc.
 
 ### History (`/history`)
-Historial de un instrumento con gráfico y métricas (CAGR, drawdown, volatility). Comparación multi.
-**API:** `/api/history/{id}`, `/api/history/compare`
+Matriz Histórico: tabla instrumento × período (vista Mensual o Anual). Toggle BRL/USD, selector de año,
+filtros por custodio/tipo/mercado con limpiar filtros, fila de totales, scroll horizontal.
+Vista Mensual: 12 columnas (Ene–Dic) para el año seleccionado.
+Vista Anual: hasta 10 columnas (últimos años con datos, valor de diciembre o último mes disponible).
+Nota: también existe endpoint legacy para historial de un instrumento (`/api/history/{id}`) usado internamente.
+**API:** `/api/history/monthly`, `/api/history/annual`, `/api/history/{id}`, `/api/history/compare`
 
 ### Annual (`/annual`)
 Tabla anual con diff, gain, net_flow. Gráfico de barras apiladas.
@@ -596,6 +602,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Dashboard con KPIs, evolución, distribución, benchmarks (CDI/IPCA), top/bottom, vencimientos
 - [x] Posiciones: filtros, paginación, sort (default: brasil→exterior→tipo→nombre), export CSV
 - [x] Historial por instrumento: gráficos, CAGR, drawdown, volatility, comparación multi
+- [x] Histórico matriz mensual/anual: instrumento × período, filtros custodio/tipo/mercado, BRL/USD toggle
 - [x] Resumen anual: tabla + gráfico apilado
 - [x] Proventos: tabla histórica (año actual desde provento_items + forecast), gráfico barras apiladas (Pagado + Previsto), grilla editable, previsión
 - [x] Importador Fixed Income (renta fija): wizard 3 pasos, diff preview, cross-custodio, mapeo manual
