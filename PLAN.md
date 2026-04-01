@@ -167,6 +167,8 @@ GET  /api/positions/export            # CSV
 
 GET  /api/history/:instrument_id      # Historia de un instrumento
 GET  /api/history/compare             # Comparacion multi-instrumento
+GET  /api/history/monthly             # Matriz mensual: instrumentos × 12 meses (filtros: custodian, type, market)
+GET  /api/history/annual              # Matriz anual: instrumentos × últimos 10 años
 
 GET  /api/annual                      # Resumen anual
 GET  /api/proventos                   # Proventos por instrumento
@@ -224,7 +226,7 @@ GET  /api/import/history              # Historial de importaciones
 13. Pagina Posiciones con tabla ordenable y filtros
 
 ### Fase 4 — Frontend resto de paginas
-14. Evolucion historica (graficos multi-serie)
+14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)
 15. Analisis Anual
 16. Proventos y dividendos
 17. Transacciones (formulario + lista)
@@ -266,7 +268,7 @@ GET  /api/import/history              # Historial de importaciones
   - Pagina Posiciones
 
 - [FASE 4] Frontend Resto
-  - Evolucion Historica
+  - [x] Histórico — matriz mensual/anual implementada
   - Analisis Anual
   - Proventos
   - Transacciones
