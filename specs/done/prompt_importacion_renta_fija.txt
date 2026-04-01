@@ -1,0 +1,708 @@
+=============================================================================
+INVESTMENT TRACKER — FUNCIONALIDAD DE IMPORTACIÓN DE RENTA FIJA
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Antes de escribir cualquier línea de código, crear el archivo TASKS.md en la
+raíz del proyecto con todas las tareas derivadas de esta especificación,
+organizadas en secciones y con checkboxes. A medida que completes cada tarea,
+actualizarla en TASKS.md marcándola como completada [ ] → [x] antes de pasar
+a la siguiente. El archivo TASKS.md debe reflejar en todo momento el estado
+real de avance del desarrollo.
+
+Formato de TASKS.md:
+  ## Sección
+  - [ ] Tarea pendiente
+  - [x] Tarea completada
+
+No iniciar el desarrollo hasta tener el TASKS.md completo y aprobado.
+
+
+=============================================================================
+1. RESUMEN DE LA FUNCIONALIDAD
+=============================================================================
+
+Agregar al sistema InvestmentTracker una funcionalidad completa de tres
+pantallas (wizard) para importar posiciones de renta fija desde el reporte
+mensual consolidado oficial de XP Investimentos y Banco Santander (archivo
+.xlsx), con las siguientes capacidades:
+
+  1. Configuración previa: el usuario elige exactamente qué categorías de
+     datos quiere importar en esa operación (valores, cantidades, datos del
+     instrumento, nuevos instrumentos, precio unitario).
+
+  2. Preview de diferencias: antes de guardar nada, el sistema parsea el
+     Excel, lo compara con lo que hay en la base de datos y muestra una tabla
+     detallada de qué va a cambiar, agrupada por estado (Nuevo / Actualizado /
+     Sin cambios / Desaparecido), filtrable y con indicadores visuales por
+     campo.
+
+  3. Confirmación e importación: el usuario revisa, ajusta si quiere (puede
+     excluir items individuales) y confirma. El sistema guarda solo lo
+     seleccionado y muestra el resultado.
+
+
+=============================================================================
+2. ESTRUCTURA DEL EXCEL FUENTE
+=============================================================================
+
+El archivo se llama "relatorio-consolidado-mensal-YYYY-mes.xlsx".
+Es el reporte mensual oficial generado por XP/Santander.
+Esta especificación usa el archivo de Febrero 2026 como referencia exacta.
+
+Las hojas relevantes para esta funcionalidad son dos:
+
+
+--- 2.1 Hoja: "Posição - Renda Fixa" ---
+
+- Headers en fila de índice 0 (pandas). Datos desde fila 1.
+- Ignorar filas donde la columna 0 ("Produto") es NaN (son totales/separadores).
+- Total de instrumentos en Febrero 2026: 38 filas de datos.
+
+Columnas (índice → nombre → descripción):
+  0   Produto               Nombre completo. Prefijo indica el tipo:
+                              "CDB -"  → CDB
+                              "CRA -"  → CRA
+                              "CRI -"  → CRI
+                              "DEB -"  → Debênture
+                              "LCA -"  → LCA
+                              "LCI -"  → LCI
+                              "LIG -"  → LIG
+                              "CFF -"  → Fondo de crédito (asset_class=FUNDO_CREDITO)
+  1   Instituição           Custodio. Normalizar así:
+                              "XP INVESTIMENTOS CCTVM S/A"        → "XP"
+                              "BANCO SANTANDER (BRASIL) SA"        → "SANTANDER"
+                              "INTER DISTRIBUIDORA..."             → "INTER"
+  2   Emissor               Nombre del emisor (ej: "BANCO AGIBANK S/A")
+  3   Código                Identificador único del título. Es la CLAVE DE MATCH.
+                            Ejemplos: "CDB325A7RYB", "ETBA12", "22F0009804"
+  4   Indexador             PREFIXADO | IPCA | DI | SELIC | "-" (vacío → null)
+  5   Tipo de regime        DEPOSITADO | REGISTRADO
+  6   Data de Emissão       Fecha de emisión. Formato DD/MM/YYYY en el Excel.
+  7   Vencimento            Fecha de vencimiento. Formato DD/MM/YYYY.
+  8   Quantidade            Cantidad total de unidades del título.
+  9   Quantidade Disponível Cantidad disponible (usar esta para el campo quantity).
+  13  Preço Atualizado MTM  Precio unitario Mark-to-Market (debêntures). Puede ser "-".
+  14  Valor Atualizado MTM  Valor total MTM en BRL. Puede ser "-".
+  15  Preço Atualizado CURVA Precio unitario por curva (CDB, LCA, LCI, CRI, CRA, LIG, TD).
+  16  Valor Atualizado CURVA Valor total CURVA en BRL. Puede ser "-".
+
+Regla de valor (qué columna usar como balance_brl):
+  - Si col[14] (Valor MTM)   es número → usar ese (debêntures tienen MTM)
+  - Si col[16] (Valor CURVA) es número → usar ese
+  - Si col[14] es número y col[16] también → preferir MTM
+  - Si ambos son "-" o NaN   → balance_brl = null (sin precio disponible)
+
+Regla de precio unitario (avg_price):
+  - Mismo criterio: preferir col[13] (Preço MTM) sobre col[15] (Preço CURVA)
+
+
+--- 2.2 Hoja: "Posição - Tesouro Direto" ---
+
+- Headers en fila de índice 0. Datos desde fila 1.
+- Ignorar filas donde la columna 0 ("Produto") es NaN.
+- Total en Febrero 2026: 3 filas de datos.
+
+Columnas (índice → nombre):
+  0   Produto           Nombre (ej: "Tesouro IPCA+ 2035")
+  1   Instituição       Custodio (normalizar igual que arriba)
+  2   Código ISIN       Usar como campo ticker/código. Ej: "BRSTNCNTB3E2"
+  3   Indexador         IPCA | SELIC | PREFIXADO
+  4   Vencimento        Fecha de vencimiento DD/MM/YYYY
+  5   Quantidade        Cantidad
+  9   Valor Aplicado    Capital original invertido (guardar en un campo separado)
+  10  Valor bruto       Valor actual bruto
+  11  Valor líquido     Valor actual neto
+  12  Valor Atualizado  → usar como balance_brl
+
+Nota: Data de Emissão no está disponible en esta hoja → issue_date = null.
+El tipo es siempre "TD" (Tesouro Direto), asset_class según el nombre del produto.
+
+
+=============================================================================
+3. DATOS REALES DEL EXCEL DE REFERENCIA (Febrero 2026)
+=============================================================================
+
+Posição - Renda Fixa (38 instrumentos):
+
+  Produto                                         | Código          | Idx        | Emisión    | Vencto     | Qtd       | Valor BRL   | Custodio
+  ------------------------------------------------|-----------------|------------|------------|------------|-----------|-------------|----------
+  CDB - BANCO AGIBANK S/A                         | CDB325A7RYB     | PREFIXADO  | 25/03/2025 | 25/03/2027 | 22        | 25149.79    | XP
+  CDB - BANCO BMG S/A                             | CDB5242VELI     | PREFIXADO  | 06/05/2024 | 18/10/2027 | 20000     | 24894.28    | XP
+  CDB - BANCO BMG S/A                             | CDB5242VELW     | PREFIXADO  | 06/05/2024 | 06/05/2027 | 48000     | 59505.84    | XP
+  CDB - BANCO C6 S.A.                             | CDB3255H87U     | PREFIXADO  | 12/03/2025 | 13/03/2028 | 100       | 114667.26   | XP
+  CDB - BANCO DIGIMAIS S/A                        | CDB325C2TBX     | PREFIXADO  | 31/03/2025 | 02/04/2029 | 50        | 57199.26    | XP
+  CDB - BANCO MASTER... EM LIQUIDACAO EXTRAJUDIC  | CDB62462J7A     | PREFIXADO  | 14/06/2024 | 13/06/2028 | 25        | 31170.10    | XP
+  CDB - BANCO ORIGINAL S/A                        | CDB3210V1S5     | PREFIXADO  | 02/07/2021 | 01/07/2026 | 10        | 16281.68    | XP
+  CDB - BANCO ORIGINAL S/A                        | CDB325C2IHN     | PREFIXADO  | 31/03/2025 | 30/03/2028 | 46        | 52494.82    | XP
+  CDB - BANCO PAN S/A                             | CDB123U4GSG     | PREFIXADO  | 31/03/2023 | 30/03/2027 | 30        | 44184.61    | XP
+  CDB - BANCO PAN S/A                             | CDB22319B6T     | PREFIXADO  | 04/04/2023 | 05/04/2027 | 25        | 36735.01    | XP
+  CDB - BANCO PLENO SA - EM LIQUIDACAO EXTRAJUD   | CDB3254VMSZ     | PREFIXADO  | 11/03/2025 | 12/03/2029 | 54        | 62189.42    | XP
+  CDB - BANCO SANTANDER (BRASIL) SA               | CDB222G7GYZ     | -          | 20/05/2022 | 29/04/2026 | 5000996   | 79469.62    | SANTANDER
+  CDB - BANCO XP S/A                              | CDB221HC8ZV     | PREFIXADO  | 09/06/2021 | 08/06/2026 | 10        | 15834.94    | XP
+  CDB - BANCO XP S/A                              | CDB422TINIK     | PREFIXADO  | 26/12/2022 | 27/12/2027 | 21        | 31169.66    | XP
+  CDB - FACTA FINANCEIRA S/A CFI                  | CDB325C2IDT     | PREFIXADO  | 31/03/2025 | 31/03/2027 | 45        | 51406.35    | XP
+  CDB - PICPAY BANK - BANCO MULTIPLO S.A          | CDB525BF81L     | PREFIXADO  | 26/05/2025 | 26/05/2027 | 38        | 42310.08    | XP
+  CDB - WILL FINANCEIRA S.A.                      | CDBB247AIED     | PREFIXADO  | 19/11/2024 | 19/11/2027 | 50        | 59545.48    | XP
+  CDB - WILL FINANCEIRA S.A.                      | CDBB24A26Y1     | PREFIXADO  | 27/11/2024 | 27/11/2028 | 40        | 47764.06    | XP
+  CFF - KIJANI ASATALA FIAGRO-IMOBILIARIO         | 4287422KIJ      | -          | 03/02/2022 | 03/02/2099 | 3712.5    | 36132.45    | XP
+  CFF - XP SELECTION ALTERNATIVO FIP              | 4728421XPA      | -          | 14/04/2021 | 14/04/2031 | 28.29     | 28981.55    | XP
+  CRA - RIZA SECURITIZADORA S.A.                  | CRA02300MOP     | PREFIXADO  | 29/09/2023 | 15/09/2028 | 98        | 102764.76*  | XP
+  CRA - RIZA SECURITIZADORA S.A.                  | CRA021000M9     | IPCA       | 22/03/2021 | 16/03/2026 | 12        | 16239.72*   | XP
+  CRA - VERT COMPANHIA SECURITIZADORA             | CRA022007EP     | IPCA       | 15/07/2022 | 15/05/2034 | 49        | 55500.34*   | SANTANDER
+  CRA - VERT COMPANHIA SECURITIZADORA             | CRA0220079D     | IPCA       | 13/07/2022 | 13/07/2032 | 48        | 54336.48*   | SANTANDER
+  CRA - VERT COMPANHIA SECURITIZADORA             | CRA021000MF     | IPCA       | 30/03/2021 | 16/03/2026 | 39        | 17733.30*   | XP
+  CRA - VERT COMPANHIA SECURITIZADORA             | CRA0220079D     | IPCA       | 13/07/2022 | 13/07/2032 | 46        | 52072.46*   | XP
+  CRI - OPEA SECURITIZADORA S/A                   | 22F0009804      | IPCA       | 15/06/2022 | 15/06/2032 | 52        | 57512.52*   | SANTANDER
+  CRI - OPEA SECURITIZADORA S/A                   | 22G0282170      | DI         | 19/07/2022 | 19/07/2027 | 33        | 32761.74*   | XP
+  CRI - OPEA SECURITIZADORA S/A                   | 25A1946535      | PREFIXADO  | 15/01/2025 | 15/01/2032 | 38        | 40156.50*   | XP
+  CRI - OPEA SECURITIZADORA S/A                   | 22C1362141      | IPCA       | 15/07/2022 | 17/07/2034 | 26        | 22621.04*   | XP
+  CRI - OPEA SECURITIZADORA S/A                   | 23D0005401      | DI         | 15/04/2023 | 15/04/2028 | 29        | 29968.89*   | XP
+  CRI - RIZA SECURITIZADORA S.A.                  | 23J1333602      | DI         | 20/10/2023 | 20/10/2028 | 64        | 66001.92*   | XP
+  CRI - RIZA SECURITIZADORA S.A.                  | 23B0004401      | DI         | 15/02/2023 | 15/02/2028 | 25        | 22444.50*   | XP
+  DEB - ETB - EMPRESA DE TRANSMISSAO BAIANA S.A.  | ETBA12          | IPCA       | 15/12/2018 | 15/02/2029 | 41        | 44828.33†   | SANTANDER
+  DEB - PETROLEO BRASILEIRO S/A - PETROBRAS       | PETR17          | IPCA       | 15/08/2019 | 15/09/2029 | 48        | 63501.08†   | SANTANDER
+  DEB - PRIO FORTE S.A.                           | PEJA11          | IPCA       | 15/08/2022 | 15/08/2032 | 24        | 28271.18†   | SANTANDER
+  DEB - RUMO S.A.                                 | RUMOA4          | IPCA       | 15/04/2020 | 15/04/2030 | 41        | 57957.93†   | SANTANDER
+  LIG - BANCO SANTANDER (BRASIL) SA               | LIG02200SLZ     | IPCA       | 23/12/2022 | 17/08/2026 | 10000000  | 139432.80   | SANTANDER
+
+  * = valor viene de Preço/Valor Atualizado CURVA (col 15/16)
+  † = valor viene de Preço/Valor Atualizado MTM  (col 13/14)
+
+Posição - Tesouro Direto (3 instrumentos):
+
+  Produto                                    | ISIN             | Idx   | Vencto     | Qtd   | Valor BRL | Custodio
+  -------------------------------------------|------------------|-------|------------|-------|-----------|----------
+  Tesouro IPCA+ 2035                         | BRSTNCNTB3E2     | IPCA  | 15/05/2035 | 4.8   | 11602.75  | INTER
+  Tesouro IPCA+ com Juros Semestrais 2035    | BRSTNCNTB0O7     | IPCA  | 15/05/2035 | 21.96 | 94355.53  | INTER
+  Tesouro Selic 2027                         | BRSTNCLF1RG5     | SELIC | 01/03/2027 | 0.9   | 16636.78  | XP
+
+
+=============================================================================
+4. CASOS ESPECIALES QUE EL PARSER DEBE MANEJAR
+=============================================================================
+
+CASO A — Mismo Código en dos custodios distintos:
+  El CRA VERT "CRA0220079D" aparece DOS veces en el Excel:
+    - Fila en Santander: 48 unidades, R$ 54.336,48
+    - Fila en XP:        46 unidades, R$ 52.072,46
+  Son dos posiciones DISTINTAS del mismo instrumento base.
+  El sistema debe crear UNA SOLA entrada en la tabla Instrument (con ese código),
+  pero DOS entradas en MonthlyPosition, diferenciadas por el campo custodian_override.
+  La tabla MonthlyPosition necesita el campo: custodian_override TEXT nullable.
+
+CASO B — Instrumentos en liquidación judicial:
+  Dos CDBs tienen "EM LIQUIDACAO EXTRAJUDICIAL" en el nombre:
+    - CDB - BANCO MASTER DE INVESTIMENTO S.A. - EM LIQUIDACAO EXTRAJUDICIAL
+    - CDB - BANCO PLENO SA - EM LIQUIDACAO EXTRAJUDICIAL
+  Al crear/actualizar el Instrument, setear: in_liquidation = True (boolean).
+  Mostrar en la UI con badge rojo "Em liquidação".
+
+CASO C — Vencimiento muy lejano:
+  CFF KIJANI tiene vencimiento 03/02/2099. Importar normalmente pero incluir
+  warning en el reporte de preview: "Vencimento inusual (año > 2060)".
+
+CASO D — CRIs/CRAs sin precio MTM ni CURVA:
+  Varios CRIs y CRAs tienen "-" en ambas columnas de valor. Ocurre cuando
+  la ANBIMA no los preciifica. Importar el instrumento y la posición con
+  balance_brl = null. Mostrar en UI como "Sin precio disponible".
+
+CASO E — Fondos de crédito (CFF):
+  Aparecen en la hoja "Posição - Renda Fixa" pero son fondos de inversión.
+  type = "fondo", asset_class = "FUNDO_CREDITO".
+
+CASO F — Cantidad de CDB Santander muy alta:
+  CDB222G7GYZ tiene Quantidade = 5.000.996 (es la cantidad en centavos de BRL,
+  no en unidades convencionales). Importar el número tal cual, sin transformar.
+
+
+=============================================================================
+5. MODELO DE BASE DE DATOS — CAMBIOS REQUERIDOS
+=============================================================================
+
+Modificar la tabla Instrument para agregar:
+  - issue_date        DATE nullable       (Data de Emissão)
+  - index_type        TEXT nullable       (PREFIXADO / IPCA / DI / SELIC)
+  - in_liquidation    BOOLEAN DEFAULT FALSE
+  - asset_class       TEXT nullable       (CDB / CRI / CRA / DEB / LCA / LCI /
+                                          LIG / TD / FUNDO_CREDITO / etc.)
+
+Modificar la tabla MonthlyPosition para agregar:
+  - quantity          DECIMAL(18,6) nullable   (Quantidade Disponível)
+  - unit_price        DECIMAL(18,8) nullable   (Preço Atualizado MTM o CURVA)
+  - custodian_override TEXT nullable           (para el caso del CRA duplicado)
+  - capital_invested  DECIMAL(18,4) nullable   (Valor Aplicado, solo Tesouro Direto)
+
+Crear índice: (instrument_id, date, custodian_override) UNIQUE.
+Antes del índice, cambiar el índice actual (instrument_id, date) a no-unique
+para soportar el caso del custodian_override.
+
+Todas las migraciones deben hacerse con Alembic.
+
+
+=============================================================================
+6. BACKEND — NUEVOS ARCHIVOS Y ENDPOINTS
+=============================================================================
+
+--- 6.1 Archivo: services/fixed_income_importer.py ---
+
+Clase principal FixedIncomeImporter con estos métodos:
+
+  parse_excel(file_bytes: bytes) -> ParsedReport
+    - Leer hoja "Posição - Renda Fixa" con header=None
+    - Usar iloc[0] como headers, datos desde iloc[1:]
+    - Filtrar filas donde iloc[0] es NaN/vacío
+    - Para cada fila: extraer tipo del prefijo de Produto
+    - Determinar valor BRL según regla de prioridad MTM > CURVA
+    - Parsear fechas DD/MM/YYYY → objetos date de Python
+    - Leer hoja "Posição - Tesouro Direto" con header=None
+    - Retornar lista unificada de ParsedInstrument
+
+  compute_diff(parsed: ParsedReport, period_date: date,
+               config: ImportConfig, db: Session) -> DiffReport
+    - Para cada ParsedInstrument:
+        1. Buscar Instrument en BD por ticker = parsed.codigo
+        2. Si no existe → status = "NEW"
+        3. Si existe → buscar MonthlyPosition más reciente con:
+             instrument_id = found.id AND custodian_override = parsed.custodian
+        4. Comparar campos según config activa:
+             - Si import_values: comparar balance_brl (tolerancia ±0.01 BRL)
+             - Si import_quantities: comparar quantity
+             - Si import_instrument_data: comparar maturity_date, index_type, etc.
+        5. Si hay alguna diferencia → status = "UPDATED"
+        6. Si no hay ninguna diferencia → status = "UNCHANGED"
+    - Para instrumentos en BD con is_active=True pero no en el Excel:
+        status = "DISAPPEARED"
+        (solo instrumentos del mismo custodian/custodian_override que el filtro)
+    - Aplicar filtro de threshold si config.value_change_threshold_pct está seteado
+
+  apply_import(diff: DiffReport, period_date: date,
+               config: ImportConfig, skip_codes: list[str],
+               db: Session) -> ImportResult
+    - Aplicar solo los items no en skip_codes
+    - Para NEW: crear Instrument y MonthlyPosition según config
+    - Para UPDATED: actualizar solo los campos habilitados en config
+    - Para DISAPPEARED: no tocar nada (solo loguear)
+    - Retornar conteos: created_instruments, created_positions, updated_positions, skipped
+
+
+Modelo Pydantic ParsedInstrument:
+  produto: str
+  codigo: str
+  tipo: str          # "CDB" | "CRI" | "CRA" | "DEB" | "LCA" | "LCI" | "LIG" | "CFF" | "TD"
+  emissor: str
+  custodian: str     # "XP" | "SANTANDER" | "INTER"
+  indexador: str | None
+  emissao: date | None
+  vencimento: date | None
+  quantidade: float | None
+  valor_brl: float | None        # el valor resuelto (MTM o CURVA)
+  unit_price: float | None       # precio unitario resuelto
+  valor_mtm: float | None        # raw
+  valor_curva: float | None      # raw
+  capital_invested: float | None # solo TD
+  in_liquidation: bool
+
+Modelo Pydantic ImportConfig:
+  # Valores
+  import_values: bool = True
+  import_value_curva: bool = True
+  import_value_mtm: bool = True
+  value_change_threshold_pct: float | None = None
+
+  # Cantidades
+  import_quantities: bool = True
+  alert_quantity_change: bool = False
+
+  # Datos del instrumento (tabla Instrument)
+  import_instrument_data: bool = True
+  import_maturity_date: bool = True
+  import_issue_date: bool = True
+  import_indexador: bool = True
+  import_custodian: bool = True
+  import_name: bool = False
+  # import_ticker siempre False — es la clave primaria, nunca se sobreescribe
+
+  # Nuevos instrumentos
+  create_new_instruments: bool = True
+  create_base_only: bool = False
+
+  # Precio unitario
+  import_unit_price: bool = True
+
+  # Filtro de custodio
+  custodian_filter: str | None = None  # "XP" | "SANTANDER" | "INTER" | None (todos)
+
+Modelo Pydantic DiffItem:
+  status: Literal["NEW", "UPDATED", "UNCHANGED", "DISAPPEARED"]
+  codigo: str
+  nome: str
+  tipo: str
+  emissor: str
+  custodian: str
+  custodian_override: str | None
+  indexador: str | None
+  emissao: date | None
+  vencimento: date | None
+  in_liquidation: bool
+  # Campos con diferencias (None si la categoría no está habilitada en config)
+  valor_actual_brl: float | None     # valor en el Excel
+  valor_anterior_brl: float | None   # último valor en BD
+  variacion_brl: float | None
+  variacion_pct: float | None
+  cantidad_actual: float | None
+  cantidad_anterior: float | None
+  # Para DISAPPEARED
+  ultimo_valor_brl: float | None
+  ultima_fecha: date | None
+  # Flags de warning
+  warnings: list[str]               # ["Vencimento inusual", "Em liquidação", etc.]
+
+
+--- 6.2 Archivo: routers/import_fixed_income.py ---
+
+Almacenamiento temporal de archivos parseados:
+  - Usar un dict en memoria (o archivo temporal) para guardar el ParsedReport
+    entre el preview y el confirm, indexado por un token UUID.
+  - TTL de 30 minutos. Limpiar expirados en cada request.
+
+Endpoint 1 — Preview:
+  POST /api/import/fixed-income/preview
+  Content-Type: multipart/form-data
+  Body:
+    file: UploadFile (.xlsx)
+    period_date: str  (formato "YYYY-MM-DD", ej: "2026-02-01")
+    config: str (JSON string del ImportConfig)
+  Response:
+    {
+      file_token: "uuid-aqui",
+      period_date: "2026-02-01",
+      summary: {
+        total_in_file: 41,
+        new_instruments: N,
+        updated_positions: N,
+        unchanged: N,
+        disappeared: N,
+        parse_errors: N,
+        no_price_available: N
+      },
+      differences: [ DiffItem, ... ],
+      parse_warnings: [ "string", ... ]
+    }
+
+Endpoint 2 — Confirmar:
+  POST /api/import/fixed-income/confirm
+  Content-Type: application/json
+  Body:
+    {
+      file_token: "uuid",
+      period_date: "2026-02-01",
+      config: ImportConfig,
+      skip_codes: ["CDB325A7RYB", ...]   # códigos a excluir de la importación
+    }
+  Response:
+    {
+      success: true,
+      imported: {
+        new_instruments: N,
+        new_positions: N,
+        updated_positions: N
+      },
+      skipped: N,
+      warnings: [ "string", ... ]
+    }
+
+Endpoint 3 — Mapear instrumento desconocido:
+  POST /api/import/fixed-income/map-instrument
+  Body:
+    { codigo_excel: str, instrument_id: int }
+  Guarda el mapeo en una tabla instrument_code_mappings(codigo_excel, instrument_id)
+  para que futuras importaciones lo usen automáticamente.
+
+Manejo de errores:
+  - Si file_token expiró → 410 Gone con mensaje claro
+  - Si el Excel no tiene las hojas esperadas → 422 con detalle
+  - Si period_date ya tiene posiciones importadas → avisar en el preview
+    (no bloquear, permitir reimportar/actualizar)
+
+
+=============================================================================
+7. FRONTEND — WIZARD DE IMPORTACIÓN EN 3 PASOS
+=============================================================================
+
+Componente principal: ImportFixedIncomeWizard
+Ubicación: src/pages/ImportFixedIncome.tsx (o como modal desde Posiciones)
+
+Triggering:
+  - Botón "Importar Extrato" en la página Posiciones Actuales
+  - Ruta dedicada: /import/fixed-income
+
+Barra de progreso: Paso 1 (Config) → Paso 2 (Preview) → Paso 3 (Confirmar)
+
+
+--- PASO 1: Configuración de importación ---
+
+Sección "Archivo y período":
+  - File picker / drag-and-drop para .xlsx
+    - Validar extensión en el cliente antes de enviar
+    - Mostrar nombre del archivo seleccionado
+  - Campo "Período": mes/año (date picker, default: mes anterior al actual)
+    - Internamente convierte a "YYYY-MM-01"
+  - Selector "Custodio": Todos / Solo XP / Solo Santander / Solo Inter
+
+Sección "¿Qué datos importar?":
+  Cuatro grupos de checkboxes con header y descripción corta:
+
+  [ GRUPO: VALORES ]
+  Checkbox principal: "Importar valores actualizados (balance BRL)"
+    Sub-opciones (habilitadas si el principal está marcado):
+    ☑ Valor por curva (CDB, LCA, LCI, CRI, CRA, LIG, TD)
+    ☑ Valor MTM — mark to market (Debêntures)
+    ☐ Filtro de ruido: ignorar cambios menores a ___% [input numérico, default vacío]
+  Texto de ayuda: "Desmarcar si ya ingresaste los valores manualmente este mes."
+
+  [ GRUPO: CANTIDADES ]
+  Checkbox principal: "Importar cantidades"
+    Sub-opciones:
+    ☑ Usar cantidad disponible
+    ☐ Alertar si la cantidad cambió (posible amortización parcial)
+  Texto de ayuda: "Útil para detectar amortizaciones en CRIs y CRAs."
+
+  [ GRUPO: DATOS DEL INSTRUMENTO ]
+  Checkbox principal: "Actualizar datos del instrumento"
+    Sub-opciones:
+    ☑ Fecha de vencimiento
+    ☑ Fecha de emisión
+    ☑ Indexador (IPCA, CDI, SELIC, Prefixado)
+    ☑ Custodio
+    ☐ Nombre del emisor [con tooltip: "sobreescribe el nombre actual"]
+  Advertencia: "Modificar datos del instrumento afecta el historial completo."
+
+  [ GRUPO: PRECIO UNITARIO ]
+  Checkbox: "Importar precio unitario por título"
+  Texto de ayuda: "Útil para calcular rendimiento por unidad en el tiempo."
+
+  [ GRUPO: NUEVOS INSTRUMENTOS ]
+  Checkbox principal: "Crear instrumentos nuevos automáticamente"
+    Sub-opciones (solo si principal marcado):
+    ● Crear con todos los datos disponibles (default)
+    ○ Crear solo el registro base sin posición inicial
+  Texto de ayuda: "Si desmarcado, solo se actualizan instrumentos ya registrados."
+
+Botón al final: "Analizar diferencias →"
+  - Validar que hay un archivo seleccionado antes de habilitar
+  - Al hacer click: enviar al endpoint /preview y pasar al Paso 2
+
+
+--- PASO 2: Preview de diferencias ---
+
+Header fijo con el resumen:
+  "Reporte: Febrero 2026  |  41 en archivo  |  Importando: Valores ✓  Cantidades ✓  Datos ✓"
+
+Cards de resumen (clickeables, filtran la tabla):
+  🟢 Nuevos: N        🟡 Actualizados: N
+  ⚪ Sin cambios: N   🔴 Desaparecidos: N   ⚠️ Con warnings: N
+
+Configuración importada activa visible (chips/tags):
+  "Valores ✓"  "Cantidades ✓"  "Datos instrumento ✓"  "Nuevos ✓"  "Precio unitario ✓"
+
+Tabla de diferencias:
+  Columnas base (siempre visibles):
+    - Checkbox de selección individual
+    - Estado (badge de color)
+    - Código
+    - Nombre (truncado)
+    - Tipo (CDB / CRI / CRA / DEB / LIG / TD / CFF)
+    - Custodio
+    - Vencimiento
+
+  Columnas condicionales (según config activa):
+    - Si import_values:      "Valor ant. → Nuevo" (formato R$ con color verde/rojo)
+    - Si import_quantities:  "Cant. ant. → Nueva"
+    - Si import_maturity_date: "Vencto ant. → Nuevo"
+
+  Columna siempre última: "Warnings" (iconos de alerta)
+
+Comportamiento de la tabla:
+  - Tabs de filtro sobre la tabla: Todos | Nuevos | Actualizados | Sin cambios |
+                                   Desaparecidos | Con warnings
+  - Ordenable por cualquier columna
+  - Paginación: 20 items por página
+  - Checkbox "Seleccionar todos" en el header (afecta solo tab actual)
+  - Items DESAPARECIDOS tienen checkbox para incluir en el procesamiento
+    (por default desmarcados — no se procesan)
+  - Items UNCHANGED también tienen checkbox (por default desmarcados)
+
+Indicadores visuales por fila:
+  - 🟢 badge verde para NEW
+  - 🟡 badge amarillo para UPDATED
+  - ⚪ badge gris para UNCHANGED
+  - 🔴 badge rojo para DISAPPEARED
+  - 🔴 chip "Em liquidação" si in_liquidation=True
+  - 💰 icono si balance_brl=null (sin precio disponible)
+  - ⚠️ icono si hay warnings en la fila (tooltip con el detalle)
+
+Sección "Warnings del archivo" (colapsable, al final):
+  Lista de todos los parse_warnings retornados por el backend.
+  Ejemplos de warnings a generar en el backend:
+    - "CFF KIJANI: vencimento en año 2099 (inusual)"
+    - "CRA0220079D: aparece en dos custodios distintos (XP y Santander)"
+    - "N instrumentos sin precio disponible"
+    - "CDB MASTER: em liquidação extrajudicial"
+    - "CDB PLENO: em liquidação extrajudicial"
+    - "Período {date} ya tiene posiciones registradas — se actualizarán"
+
+Botones en el footer:
+  "← Volver a config"    "Importar seleccionados ({N}) →"
+    - El botón de importar solo se habilita si hay al menos 1 item seleccionado
+    - Mostrar el conteo de items seleccionados en tiempo real
+
+
+--- PASO 3: Confirmación y resultado ---
+
+Durante la importación:
+  - Barra de progreso indeterminada
+  - Texto: "Importando N posiciones..."
+
+Al completar (éxito):
+  Recuadro verde con:
+    - "✅ Importación completada"
+    - "Instrumentos nuevos: N"
+    - "Posiciones actualizadas: N"
+    - "Posiciones nuevas: N"
+    - "Omitidos: N"
+  Botones:
+    "Ver posiciones actualizadas" (→ página Posiciones)
+    "Importar otro archivo"       (→ reinicia el wizard en Paso 1)
+
+Al completar (con errores parciales):
+  Recuadro amarillo con detalle de qué falló y qué sí se importó.
+  Lista de errores scrolleable.
+
+Al fallar:
+  Recuadro rojo con mensaje de error y opción de reintentar.
+
+
+=============================================================================
+8. INTEGRACIONES CON EL SISTEMA EXISTENTE
+=============================================================================
+
+Página Posiciones Actuales:
+  - Agregar botón "Importar Extrato XP/Santander" en el header de la página
+  - Después de una importación exitosa: invalidar el cache de posiciones y
+    refrescar la tabla automáticamente sin recargar la página
+  - Agregar chip/badge en el header de la página: "Último extrato: Feb 2026"
+    (basado en la fecha máxima de MonthlyPosition para instrumentos de renta fija)
+
+Tabla de instrumentos de renta fija:
+  - Agregar columna "Indexador" (IPCA / CDI / PREFIXADO / SELIC)
+  - Agregar columna "Vencimiento" con formato MM/AAAA
+  - Agregar badge "Em liquidação" en rojo para instrumentos con in_liquidation=True
+  - Agregar indicador visual cuando balance_brl es null ("Sin precio")
+
+Dashboard:
+  - Si hay instrumentos sin precio disponible, mostrar nota discreta:
+    "N instrumentos sin precio actualizado"
+
+
+=============================================================================
+9. LÓGICA DE APPLY_IMPORT — PSEUDOCÓDIGO COMPLETO
+=============================================================================
+
+Para cada DiffItem que NO está en skip_codes:
+
+  SI status == "NEW" Y config.create_new_instruments:
+    instrumento = Instrument(
+      name      = item.nome,
+      ticker    = item.codigo,
+      type      = "renta_fija",
+      asset_class = item.tipo,
+      currency  = "BRL",
+      is_active = True,
+      in_liquidation = item.in_liquidation,
+      # Solo los campos habilitados en config:
+      custodian     = item.custodian     SI config.import_custodian,
+      maturity_date = item.vencimento    SI config.import_maturity_date,
+      issue_date    = item.emissao       SI config.import_issue_date,
+      index_type    = item.indexador     SI config.import_indexador,
+    )
+    db.add(instrumento); db.flush()
+    SI NO config.create_base_only:
+      crear MonthlyPosition (ver abajo)
+
+  SI status == "UPDATED":
+    SI config.import_instrument_data:
+      SI config.import_maturity_date Y item.vencimento: instrumento.maturity_date = item.vencimento
+      SI config.import_issue_date    Y item.emissao:    instrumento.issue_date    = item.emissao
+      SI config.import_indexador     Y item.indexador:  instrumento.index_type    = item.indexador
+      SI config.import_custodian     Y item.custodian:  instrumento.custodian     = item.custodian
+      SI config.import_name          Y item.nome:       instrumento.name          = item.nome
+    crear/actualizar MonthlyPosition (ver abajo)
+
+  SI status == "UNCHANGED" Y item está seleccionado explícitamente:
+    crear/actualizar MonthlyPosition (forzado)
+
+  SI status == "DISAPPEARED": no hacer nada
+
+  Crear/actualizar MonthlyPosition:
+    position_data = {}
+    SI config.import_values Y item.valor_brl NO ES None:
+      threshold = config.value_change_threshold_pct
+      SI threshold Y valor_anterior_brl:
+        cambio_pct = |item.valor_brl - valor_anterior_brl| / valor_anterior_brl
+        SI cambio_pct >= threshold: position_data["balance_brl"] = item.valor_brl
+      ELSE: position_data["balance_brl"] = item.valor_brl
+    SI config.import_quantities Y item.cantidad_actual NO ES None:
+      position_data["quantity"] = item.cantidad_actual
+    SI config.import_unit_price Y item.unit_price NO ES None:
+      position_data["unit_price"] = item.unit_price
+
+    SI position_data NO está vacío:
+      posicion_existente = buscar MonthlyPosition donde
+        instrument_id = instrumento.id AND
+        date = period_date AND
+        custodian_override = item.custodian_override
+      SI existe: actualizar campos
+      SI no existe: crear nueva con previous_balance = último balance conocido
+
+
+=============================================================================
+10. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+  1. El parser procesa el archivo de Febrero 2026 sin errores y detecta
+     exactamente 38 instrumentos de Renda Fixa + 3 de Tesouro Direto = 41 total.
+
+  2. El caso CRA0220079D duplicado (misma código, dos custodios) genera
+     DOS DiffItems distintos y se importa como DOS MonthlyPositions diferentes.
+
+  3. Los dos CDBs con "EM LIQUIDACAO EXTRAJUDICIAL" se importan con
+     in_liquidation=True y se muestran con badge rojo en la UI.
+
+  4. Los CRIs/CRAs sin precio disponible se importan con balance_brl=null
+     y se muestran con indicador "Sin precio" en la UI.
+
+  5. Desmarcar "Importar valores" en el Paso 1 hace que el preview no muestre
+     la columna de valor y que la importación no toque el campo balance_brl.
+
+  6. El archivo file_token expira después de 30 minutos y el endpoint /confirm
+     retorna 410 Gone con mensaje claro al intentar usarlo.
+
+  7. Importar el mismo período dos veces actualiza las posiciones existentes,
+     no crea duplicados.
+
+  8. El campo custodian_override permite múltiples MonthlyPosition del mismo
+     instrument_id en la misma fecha cuando el custodio difiere.
+
+  9. Después de confirmar, la página Posiciones Actuales se refresca
+     automáticamente y el chip "Último extrato" muestra el período correcto.
+
+  10. TASKS.md se crea antes de empezar el código y se mantiene actualizado
+      durante todo el desarrollo.
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

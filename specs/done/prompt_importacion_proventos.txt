@@ -1,0 +1,508 @@
+=============================================================================
+INVESTMENT TRACKER — FUNCIONALIDAD DE IMPORTACIÓN DE PROVENTOS
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Antes de escribir cualquier línea de código, crear el archivo TASKS.md en la
+raíz del proyecto (o agregar una sección "## Importación de Proventos" si ya
+existe) con todas las tareas derivadas de esta especificación, organizadas en
+secciones con checkboxes. A medida que completes cada tarea, marcarla como
+completada [ ] → [x] antes de pasar a la siguiente. No iniciar el desarrollo
+hasta tener el TASKS.md completo.
+
+
+=============================================================================
+1. RESUMEN DE LA FUNCIONALIDAD
+=============================================================================
+
+Agregar al sistema InvestmentTracker la capacidad de importar proventos
+(dividendos, rendimentos, JCP, pagamento de juros) desde la hoja
+"Proventos Recebidos" del reporte mensual consolidado de XP/Santander.
+
+La funcionalidad sigue el mismo patrón wizard de 3 pasos ya existente para
+la importación de renta fija:
+  Paso 1 → Configuración y upload
+  Paso 2 → Preview de diferencias con lo que ya hay en la tabla Provento
+  Paso 3 → Confirmación e importación
+
+El sistema debe ser capaz de:
+  - Parsear la hoja correctamente, incluyendo cantidades con formato brasileño
+    (punto como separador de miles: "3.712,50" → 3712.50)
+  - Hacer match entre el Produto del Excel y los Instrument registrados en la BD
+  - Detectar proventos ya importados y mostrarlos como duplicados (no sobreescribir
+    a menos que el usuario lo pida explícitamente)
+  - Clasificar el tipo de provento según el "Tipo de Evento" del Excel
+  - Agrupar en el preview por instrumento y por fecha de pago
+
+
+=============================================================================
+2. ESTRUCTURA DE LA HOJA "Proventos Recebidos"
+=============================================================================
+
+- Nombre exacto de la hoja: "Proventos Recebidos"
+- Headers en fila de índice 0 (pandas). Datos desde fila 1.
+- Ignorar filas donde la columna 0 ("Produto") es NaN (son totales/separadores).
+- El total global está en la última fila no-nula de la col 6 con label "Total"
+  en col 5 — ignorar esa fila también.
+- Total de proventos en Febrero 2026: 17 filas de datos.
+
+Columnas (índice → nombre → descripción):
+  0   Produto           Nombre del instrumento. Dos formatos posibles:
+                          Formato A — Ticker: "MCRE11 - MAUÁ CAPITAL REAL ESTATE..."
+                            El ticker es la parte ANTES del primer " - "
+                            Ejemplos: MCRE11, XPML11, PETR4, IRIM11, VILG11
+                          Formato B — Tipo: "CRI - OPEA SECURITIZADORA S/A"
+                            Empieza con el tipo del instrumento (CRI, CRA, DEB, CFF)
+                            No tiene ticker extraíble directamente
+  1   Pagamento         Fecha de pago. Formato DD/MM/YYYY en el Excel.
+  2   Tipo de Evento    Categoría del evento. Valores posibles (exactos):
+                          "Rendimento"                    → type = "dividendo"
+                          "Juros Sobre Capital Próprio"   → type = "jcp"
+                          "PAGAMENTO DE JUROS"            → type = "jcp"
+                          "PAGAMENTO DE PRÊMIO/RENDIMENTOS" → type = "dividendo"
+  3   Instituição       Custodio. Normalizar:
+                          "XP INVESTIMENTOS CCTVM S/A"    → "XP"
+                          "BANCO SANTANDER (BRASIL) S.A." → "SANTANDER"
+                          "INTER DISTRIBUIDORA..."        → "INTER"
+  4   Quantidade        Cantidad de unidades sobre las que se pagó el provento.
+                        ATENCIÓN: puede venir en formato brasileño con punto como
+                        separador de miles: "3.712,50" → float 3712.50
+                        También puede venir como número normal: 77, 173, 2900
+  5   Preço unitário    Valor pagado por unidad en BRL.
+  6   Valor líquido     Valor total neto pagado en BRL (= Quantidade × Preço unitário,
+                        ya descontado IR cuando corresponde).
+                        ESTE es el campo amount_brl a guardar en la tabla Provento.
+
+
+=============================================================================
+3. DATOS REALES DEL ARCHIVO DE REFERENCIA (Febrero 2026)
+=============================================================================
+
+17 proventos recibidos, total R$ 8.075,45:
+
+  Fecha pago  | Produto                                          | Tipo de Evento                  | Qtd      | P.Unit | Valor BRL | Custodio
+  ------------|--------------------------------------------------|----------------------------------|----------|--------|-----------|----------
+  25/02/2026  | MCRE11 - MAUÁ CAPITAL REAL ESTATE FDO DE INV   | Rendimento                       | 2.710    | 0.11   | 298.10    | XP
+  25/02/2026  | XPML11 - XP MALLS FDO INV IMOB FII             | Rendimento                       | 77       | 0.92   | 70.84     | XP
+  20/02/2026  | PETR4 - PETROLEO BRASILEIRO S/A PETROBRAS       | Rendimento                       | 2.900    | 0.01   | 20.05     | XP
+  20/02/2026  | PETR4 - PETROLEO BRASILEIRO S/A PETROBRAS       | Juros Sobre Capital Próprio      | 2.900    | 0.47   | 1162.51   | XP
+  19/02/2026  | IRIM11 - IRIDIUM FUNDO DE INVESTIMENTO IMOBIL. | Rendimento                       | 173      | 0.69   | 119.37    | XP
+  18/02/2026  | CFF - KIJANI ASATALA FIAGRO-IMOBILIARIO        | PAGAMENTO DE PRÊMIO/RENDIMENTOS  | 3.712,50 | 0.10   | 371.25    | XP
+  18/02/2026  | CRI - OPEA SECURITIZADORA S/A                  | PAGAMENTO DE JUROS               | 26       | 5.26   | 136.87    | XP
+  18/02/2026  | CRI - RIZA SECURITIZADORA S.A.                 | PAGAMENTO DE JUROS               | 25       | 78.53  | 1963.34   | XP
+  18/02/2026  | DEB - ETB - EMPRESA DE TRANSMISSAO BAIANA S.A. | PAGAMENTO DE JUROS               | 41       | 31.99  | 1311.75   | SANTANDER
+  18/02/2026  | DEB - PRIO FORTE S.A.                          | PAGAMENTO DE JUROS               | 24       | 42.87  | 1029.02   | SANTANDER
+  13/02/2026  | VILG11 - FII VINCI LG                          | Rendimento                       | 689      | 0.80   | 551.20    | XP
+  13/02/2026  | VINO11 - VINCI OFFICES FDO INV IMOB            | Rendimento                       | 2.090    | 0.05   | 94.05     | XP
+  13/02/2026  | XPLG11 - XP LOG FUNDO DE INVESTIMENTO IMOB FII | Rendimento                       | 455      | 0.82   | 373.10    | XP
+  09/02/2026  | GGRC11 - GGR COVEPI RENDA FII                  | Rendimento                       | 2.040    | 0.10   | 204.00    | XP
+  09/02/2026  | PATL11 - PÁTRIA LOGÍSTICA FII                  | Rendimento                       | 150      | 0.57   | 85.50     | XP
+  06/02/2026  | HSML11 - HSI MALL FDO INV IMOB                 | Rendimento                       | 85       | 0.70   | 59.50     | XP
+  06/02/2026  | RZTR11 - FUNDO DE INVESTIMENTO IMOBILIÁRIO     | Rendimento                       | 225      | 1.00   | 225.00    | XP
+
+
+=============================================================================
+4. CASOS ESPECIALES DEL PARSER
+=============================================================================
+
+CASO A — Formato numérico brasileño en Quantidade:
+  "3.712,50" debe parsearse como float 3712.50 (NO como 3.71250).
+  El punto es separador de miles, la coma es separador decimal.
+  Aplicar esta conversión solo a campos numéricos cuando el valor es string.
+  Función helper:
+    def parse_br_number(val) -> float | None:
+        if isinstance(val, (int, float)):
+            return float(val)
+        if isinstance(val, str):
+            cleaned = val.strip().replace('.', '').replace(',', '.')
+            try:
+                return float(cleaned)
+            except ValueError:
+                return None
+        return None
+
+CASO B — Mismo instrumento, misma fecha, tipos distintos:
+  PETR4 aparece DOS veces el 20/02/2026:
+    - "Rendimento" → R$ 20.05
+    - "Juros Sobre Capital Próprio" → R$ 1162.51
+  Son dos proventos DISTINTOS del mismo instrumento en la misma fecha.
+  La tabla Provento necesita la tupla (instrument_id, date, type) como clave
+  de unicidad para el check de duplicados. NO usar solo (instrument_id, date).
+
+CASO C — Instrumento sin ticker (Formato B):
+  "CRI - OPEA SECURITIZADORA S/A" y "CRI - RIZA SECURITIZADORA S.A."
+  No tienen un ticker directo extraíble. La estrategia de matching es:
+    1. Buscar en Instrument donde name LIKE '%OPEA%' AND type = 'renta_fija'
+    2. Si hay exactamente 1 resultado → usar ese instrument_id
+    3. Si hay 0 o más de 1 → marcar como NO_MATCH en el preview
+  El usuario puede asignar manualmente el instrument_id en ese caso.
+  (Ver endpoint /map-instrument ya existente en la funcionalidad de RF)
+
+CASO D — CFF en la hoja de Proventos:
+  "CFF - KIJANI ASATALA FIAGRO-IMOBILIARIO" es un fondo de crédito.
+  Mismo matching por nombre que CRI/CRA/DEB.
+
+CASO E — Nombres de FIIs con variantes:
+  "VILG11 - FII VINCI LG" en Proventos vs potencial "VILG11 - VINCI LOGÍSTICA FII"
+  en la tabla Instrument. El ticker (VILG11) es suficiente para el match exacto.
+  Siempre priorizar match por ticker cuando está disponible (Formato A).
+
+CASO F — Validación del total:
+  La hoja muestra Total = 8075.45.
+  El parser debe calcular sum(Valor líquido) y comparar con el total del Excel.
+  Si difieren en más de R$ 0.10 → incluir warning en el reporte de preview.
+  En el archivo de Febrero 2026: sum = 8075.45 ✓ (coincide exactamente).
+
+
+=============================================================================
+5. MODELO DE BASE DE DATOS — CAMBIOS REQUERIDOS
+=============================================================================
+
+La tabla Provento ya existe con estos campos (del spec anterior):
+  id              INTEGER PRIMARY KEY
+  instrument_id   INTEGER FK → Instrument.id
+  date            DATE NOT NULL         (fecha de PAGO del provento)
+  amount_brl      DECIMAL(18,4)
+  type            TEXT                  ('dividendo' | 'jcp' | 'amortizacion')
+  notes           TEXT
+
+Agregar los siguientes campos (migración Alembic):
+  quantity        DECIMAL(18,6) nullable   (Quantidade del Excel)
+  unit_price      DECIMAL(18,8) nullable   (Preço unitário del Excel)
+  custodian       TEXT nullable            ("XP" | "SANTANDER" | "INTER")
+  source          TEXT nullable            ("MANUAL" | "EXCEL_XP_SANTANDER")
+  import_batch_id TEXT nullable            (UUID del lote de importación,
+                                           para poder auditar o revertir)
+  raw_event_type  TEXT nullable            (el Tipo de Evento original del Excel,
+                                           ej: "Juros Sobre Capital Próprio")
+
+Índice de unicidad para detección de duplicados:
+  UNIQUE(instrument_id, date, type)
+  Si ya existe este índice, verificar que type sea parte de él.
+  Si el índice actual es solo (instrument_id, date), modificarlo para incluir type.
+
+Nueva tabla para lotes de importación (audit trail):
+  CREATE TABLE provento_import_batches (
+    id          TEXT PRIMARY KEY,        -- UUID
+    imported_at DATETIME DEFAULT NOW(),
+    period_label TEXT,                   -- "Febrero 2026"
+    source_file  TEXT,                   -- nombre del archivo
+    total_amount DECIMAL(18,4),          -- suma del lote
+    record_count INTEGER,
+    created_by   TEXT                    -- puede ser null
+  )
+
+
+=============================================================================
+6. BACKEND — NUEVOS ARCHIVOS Y ENDPOINTS
+=============================================================================
+
+--- 6.1 Archivo: services/proventos_importer.py ---
+
+Clase ProventosImporter:
+
+  parse_excel(file_bytes: bytes) -> ParsedProventosReport
+    - Leer hoja "Proventos Recebidos" con header=None
+    - Usar iloc[0] como headers, datos desde iloc[1:]
+    - Filtrar filas donde col[0] es NaN o col[6] es NaN
+    - Filtrar la fila de "Total" (col[5] == "Total" o col[6] contiene solo el total)
+    - Para Quantidade: aplicar parse_br_number()
+    - Para Preço unitário y Valor líquido: aplicar parse_br_number()
+    - Mapear Tipo de Evento → type interno:
+        "Rendimento"                     → "dividendo"
+        "Juros Sobre Capital Próprio"    → "jcp"
+        "PAGAMENTO DE JUROS"             → "jcp"
+        "PAGAMENTO DE PRÊMIO/RENDIMENTOS" → "dividendo"
+        cualquier otro                   → "dividendo" + warning
+    - Extraer ticker si Formato A (nombre empieza con ticker seguido de " - ")
+      Formato A: el primer segmento antes de " - " tiene entre 4 y 7 caracteres
+                 alfanuméricos y no empieza con "CRI", "CRA", "DEB", "CFF", etc.
+    - Calcular suma total y comparar con el total del Excel
+    - Retornar ParsedProventosReport
+
+  compute_diff(parsed: ParsedProventosReport, db: Session) -> ProventosDiffReport
+    - Para cada ParsedProvento:
+        1. Match con Instrument:
+           a. Si tiene ticker → buscar Instrument.ticker = ticker (exacto)
+           b. Si no tiene ticker → buscar Instrument.name LIKE '%{keyword}%'
+              donde keyword es la parte más distintiva del nombre del emisor
+              (ej: para "CRI - OPEA SECURITIZADORA S/A" → buscar "OPEA")
+           c. Si match exacto de 1 resultado → instrument_id encontrado
+           d. Si 0 resultados → status = "NO_MATCH"
+           e. Si >1 resultados → status = "AMBIGUOUS_MATCH", incluir opciones
+        2. Si tiene instrument_id:
+           a. Buscar Provento donde instrument_id=X AND date=fecha AND type=type
+           b. Si existe y amount_brl igual (±0.01) → status = "DUPLICATE"
+           c. Si existe y amount_brl diferente → status = "CONFLICT"
+              (mismo evento pero monto distinto — puede ser corrección)
+           d. Si no existe → status = "NEW"
+    - Retornar ProventosDiffReport
+
+  apply_import(diff: ProventosDiffReport, force_duplicates: bool,
+               skip_codes: list[str], batch_id: str, db: Session) -> ImportResult
+    - Ignorar items en skip_codes
+    - Para NEW: crear Provento con todos los campos
+    - Para CONFLICT: sobreescribir si force_duplicates=True, sino skip
+    - Para DUPLICATE: skip siempre (a menos que force_duplicates=True)
+    - Para NO_MATCH y AMBIGUOUS_MATCH: skip (requieren resolución manual)
+    - Crear registro en provento_import_batches
+    - Retornar conteos
+
+
+Modelo Pydantic ParsedProvento:
+  produto_raw: str           (texto original del Excel)
+  ticker: str | None         (extraído si Formato A)
+  nombre_busqueda: str       (keyword para búsqueda si Formato B)
+  tipo_evento_raw: str       (Tipo de Evento original)
+  custodian: str             ("XP" | "SANTANDER" | "INTER")
+  fecha_pago: date
+  cantidad: float | None
+  precio_unitario: float | None
+  amount_brl: float          (Valor líquido)
+  type: str                  ("dividendo" | "jcp")
+
+Modelo Pydantic ProventosDiffItem:
+  status: Literal["NEW", "DUPLICATE", "CONFLICT", "NO_MATCH", "AMBIGUOUS_MATCH"]
+  parsed: ParsedProvento
+  instrument_id: int | None          (None si NO_MATCH)
+  instrument_name: str | None
+  instrument_ticker: str | None
+  # Para CONFLICT:
+  existing_amount_brl: float | None  (monto que ya hay en la BD)
+  # Para AMBIGUOUS_MATCH:
+  match_candidates: list[dict]       (lista de {id, name, ticker} posibles)
+  warnings: list[str]
+
+
+--- 6.2 Archivo: routers/import_proventos.py ---
+
+Mismo patrón de file_token temporal (TTL 30 min) que la importación de RF.
+
+Endpoint 1 — Preview:
+  POST /api/import/proventos/preview
+  Content-Type: multipart/form-data
+  Body:
+    file: UploadFile (.xlsx)
+    period_label: str   (ej: "Febrero 2026", solo para display)
+  Response:
+    {
+      file_token: "uuid",
+      period_label: "Febrero 2026",
+      summary: {
+        total_in_file: 17,
+        total_amount_brl: 8075.45,
+        total_validated: true,         (si suma coincide con total del Excel)
+        new: N,
+        duplicates: N,
+        conflicts: N,
+        no_match: N,
+        ambiguous_match: N
+      },
+      differences: [ ProventosDiffItem, ... ],
+      parse_warnings: [ "string", ... ]
+    }
+
+Endpoint 2 — Confirmar:
+  POST /api/import/proventos/confirm
+  Content-Type: application/json
+  Body:
+    {
+      file_token: "uuid",
+      period_label: "Febrero 2026",
+      force_duplicates: false,       (sobreescribir duplicados y conflictos)
+      skip_ids: [0, 3, 5],           (índices de items a omitir, por posición en diff)
+      manual_mappings: [             (resoluciones manuales de NO_MATCH)
+        { index: 6, instrument_id: 42 },
+        { index: 7, instrument_id: 51 }
+      ]
+    }
+  Response:
+    {
+      success: true,
+      batch_id: "uuid-del-lote",
+      imported: { new: N, overwritten: N },
+      skipped: { duplicates: N, no_match: N, manual_skip: N },
+      total_amount_imported: XXXX.XX,
+      warnings: [...]
+    }
+
+Endpoint 3 — Revertir un lote (opcional pero recomendado):
+  DELETE /api/import/proventos/batch/{batch_id}
+  Elimina todos los Provento con import_batch_id = batch_id.
+  Protección: solo se puede revertir si el lote tiene menos de 24 horas.
+  Response: { deleted: N, batch_id: "..." }
+
+Endpoint 4 — Historial de lotes:
+  GET /api/import/proventos/batches
+  Retorna lista de provento_import_batches ordenada por imported_at DESC.
+
+
+=============================================================================
+7. FRONTEND — WIZARD DE IMPORTACIÓN EN 3 PASOS
+=============================================================================
+
+Componente: ImportProventosWizard
+Ruta: /import/proventos (o modal desde la página de Proventos)
+Triggering: botón "Importar Proventos" en la página de Proventos y Dividendos.
+
+
+--- PASO 1: Upload y configuración ---
+
+Sección "Archivo":
+  - File picker / drag-and-drop para .xlsx
+  - Validar extensión en cliente
+  - Mostrar nombre del archivo seleccionado
+  - Campo "Período": texto libre (ej: "Febrero 2026") — solo para etiqueta visual
+  
+Sección "Opciones":
+  ☐ Sobreescribir proventos duplicados si el monto cambió (CONFLICT)
+    Texto de ayuda: "Marcar si estás reimportando un mes corregido."
+
+Botón: "Analizar proventos →"
+
+
+--- PASO 2: Preview de diferencias ---
+
+Header con resumen:
+  "Proventos Recibidos — Febrero 2026"
+  "17 proventos   |   Total: R$ 8.075,45   |   ✅ Total validado"
+
+Cards de resumen (clickeables):
+  🟢 Nuevos: N        🔵 Duplicados: N
+  🟠 Conflictos: N    🔴 Sin match: N    🟡 Match ambiguo: N
+
+Tabla de proventos:
+  Columnas:
+    - Checkbox de selección
+    - Estado (badge de color)
+    - Fecha pago (DD/MM/AAAA)
+    - Instrumento (nombre + ticker si aplica)
+    - Tipo (Rendimento / JCP / Juros)
+    - Cantidad
+    - P. Unitario
+    - Valor (BRL, resaltado)
+    - Custodio
+    - Acción especial (solo para NO_MATCH y AMBIGUOUS)
+
+  Filas con estado DUPLICATE:
+    - Fondo levemente grisado
+    - Tooltip: "Ya importado: R$ {monto anterior} el {fecha}"
+    - Por default: desmarcado (no se reimporta)
+
+  Filas con estado CONFLICT:
+    - Fondo naranja claro
+    - Mostrar: "BD: R$ {monto_anterior} → Excel: R$ {monto_nuevo}"
+    - Por default: desmarcado (requiere decisión explícita)
+
+  Filas con estado NO_MATCH:
+    - Fondo rojo claro
+    - Botón inline "Asignar instrumento" → abre un mini-selector:
+        Input de búsqueda de instrumento (autocomplete sobre /api/instruments)
+        Al seleccionar: actualiza manual_mappings en el estado del wizard
+        La fila cambia de NO_MATCH a NEW (con instrument asignado)
+
+  Filas con estado AMBIGUOUS_MATCH:
+    - Fondo amarillo claro
+    - Mostrar lista de candidatos: "¿Es VILG12 o VILG11?"
+    - Botones para seleccionar cuál
+    - Al seleccionar: fila cambia a NEW
+
+Sección de warnings (colapsable):
+  Lista de parse_warnings del backend.
+  Ejemplos típicos:
+    - "Tipo de Evento desconocido: 'BONIFICAÇÃO' — clasificado como dividendo"
+    - "Suma calculada (8075.45) no coincide con total del Excel (8080.00)"
+    - "PETR4: dos proventos el mismo día con tipos diferentes (esperado)"
+
+Botones footer:
+  "← Volver"    "Importar seleccionados ({N} proventos / R$ {sum}) →"
+  El monto total de los items seleccionados se recalcula en tiempo real.
+
+
+--- PASO 3: Resultado ---
+
+Al completar exitosamente:
+  "✅ N proventos importados — R$ XXXX,XX"
+  Detalle: "Nuevos: N  |  Omitidos: N  |  Sin match: N (requieren resolución)"
+  
+  Si hay items NO_MATCH que quedaron sin importar:
+    "⚠️ N proventos no pudieron importarse por falta de instrumento."
+    "Podés asignarlos manualmente desde la página de Proventos."
+    Botón: "Ir a Proventos pendientes"
+
+  Botones:
+    "Ver proventos del período"   (→ filtra la página de Proventos por ese mes)
+    "Importar otro archivo"       (→ reinicia el wizard)
+
+Al completar con batch_id disponible:
+  Link discreto: "Revertir esta importación" (con confirmación)
+
+
+=============================================================================
+8. INTEGRACIONES CON EL SISTEMA EXISTENTE
+=============================================================================
+
+Página Proventos y Dividendos:
+  - Agregar botón "Importar Proventos" en el header
+  - Agregar sub-pestaña o sección "Pendientes de match" que muestre proventos
+    donde instrument_id = null (si se implementa guardado parcial de NO_MATCH)
+  - Agregar columna "Fuente" en la tabla (MANUAL / Excel) con icono discreto
+  - Al hacer click en un provento: mostrar custodio, raw_event_type y batch_id
+    en el panel de detalle
+
+Dashboard:
+  - El widget de "Proventos YTD" debe incluir los importados desde Excel
+  - Agregar nota opcional: "Último extrato importado: Febrero 2026"
+
+Integración con el importer de Renta Fija:
+  - Ambos importers leen del mismo archivo .xlsx
+  - Sería ideal poder subir el archivo una sola vez y disparar ambos importers
+  - Implementar un endpoint combinado opcional:
+      POST /api/import/monthly-report/preview
+      Que ejecute en paralelo el preview de RF y el preview de Proventos
+      y retorne ambos resultados en una sola respuesta.
+  - La UI puede mostrar ambos wizards en tabs o en pantallas separadas
+    (decisión de implementación).
+
+
+=============================================================================
+9. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+  1. El parser procesa el archivo de Febrero 2026 y extrae exactamente
+     17 proventos con un total de R$ 8.075,45.
+
+  2. La cantidad "3.712,50" del CFF KIJANI se parsea correctamente como
+     3712.50, no como 3.71250.
+
+  3. Los dos proventos de PETR4 del 20/02/2026 (Rendimento y JCP) son
+     tratados como DOS ítems distintos y se pueden importar ambos.
+
+  4. El match para "CRI - OPEA SECURITIZADORA S/A" busca por nombre
+     parcial ("OPEA") y si encuentra exactamente un Instrument → lo asigna.
+     Si no lo encuentra → status NO_MATCH y el usuario puede asignarlo.
+
+  5. Importar el mismo archivo dos veces marca los 17 ítems como DUPLICATE
+     (no crea duplicados en la tabla Provento).
+
+  6. Un ítem en estado CONFLICT (mismo instrumento/fecha/tipo pero monto
+     diferente) no se sobreescribe a menos que force_duplicates=True.
+
+  7. El DELETE /api/import/proventos/batch/{batch_id} elimina exactamente
+     los N proventos del lote y no afecta otros registros.
+
+  8. El campo import_batch_id permite trazar exactamente qué proventos
+     entraron en cada importación.
+
+  9. Los proventos importados aparecen correctamente en el cálculo de
+     "Proventos YTD" del Dashboard.
+
+  10. TASKS.md se crea antes de empezar el código y se mantiene actualizado
+      durante todo el desarrollo.
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================
