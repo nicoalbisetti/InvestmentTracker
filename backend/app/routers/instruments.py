@@ -12,19 +12,48 @@ router = APIRouter(prefix="/api/instruments", tags=["instruments"])
 def get_instruments(
     status: Optional[str] = None,
     type: Optional[str] = None,
+    location: Optional[str] = None,
+    currency: Optional[str] = None,
+    custodian: Optional[str] = None,
+    no_maturity: bool = Query(False),
     search: Optional[str] = None,
+    with_position: bool = Query(False),
+    sort: Optional[str] = Query("name"),
+    order: Optional[str] = Query("asc"),
     page: int = Query(1, ge=1),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
 ):
+    SORTABLE = {
+        "name": Instrument.name,
+        "ticker": Instrument.ticker,
+        "custodian": Instrument.custodian,
+        "type": Instrument.type,
+        "status": Instrument.status,
+        "maturity_date": Instrument.maturity_date,
+    }
     query = db.query(Instrument)
     if status:
         query = query.filter(Instrument.status == status)
     if type:
         query = query.filter(Instrument.type == type)
+    if location:
+        query = query.filter(Instrument.location == location)
+    if currency:
+        query = query.filter(Instrument.currency == currency)
+    if custodian:
+        query = query.filter(Instrument.custodian == custodian)
+    if no_maturity:
+        query = query.filter(Instrument.maturity_date.is_(None))
     if search:
         query = query.filter(Instrument.name.ilike(f"%{search}%"))
-    query = query.order_by(Instrument.name.asc())
+    if with_position:
+        query = query.filter(
+            Instrument.current_balance_brl.isnot(None),
+            Instrument.current_balance_brl > 0,
+        )
+    col = SORTABLE.get(sort or "name", Instrument.name)
+    query = query.order_by(col.desc() if order == "desc" else col.asc())
 
     total = query.count()
     instruments = query.offset((page - 1) * limit).limit(limit).all()

@@ -44,7 +44,7 @@ export default function Positions() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [priceMonth, setPriceMonth] = useState(currentMonth);
   const isHistorical = priceMonth !== currentMonth;
-  const [editing, setEditing] = useState<{ mpId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
+  const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
   const [showReturns, setShowReturns] = useState(true);
 
   useEffect(() => {
@@ -61,6 +61,11 @@ export default function Positions() {
     const timer = setTimeout(() => load({ ...filters, search: search || undefined, month }), 300);
     return () => clearTimeout(timer);
   }, [filters, search, priceMonth]);
+
+  const ensureMonthPosition = async (instrumentId: number, month: string): Promise<number> => {
+    const r = await client.post('/api/positions/ensure-month', { instrument_id: instrumentId, month });
+    return r.data.mp_id;
+  };
 
   const saveBalance = async (mpId: number, field: 'balance_brl' | 'balance_usd' | 'quantity', value: string) => {
     const num = parseFloat(value.replace(',', '.'));
@@ -346,8 +351,14 @@ export default function Positions() {
                             <span className="ml-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 px-1.5 py-0.5 rounded-full">Em liquidação</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 font-mono text-gray-800 dark:text-gray-200 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, field: 'balance_brl', value: String(row.balance_brl ?? '') })}>
-                          {editing?.mpId === row.mp_id && editing.field === 'balance_brl' ? (
+                        <td className="px-3 py-2 font-mono text-gray-800 dark:text-gray-200 cursor-pointer group" onClick={async () => {
+                            const month = priceMonth !== currentMonth ? priceMonth : undefined;
+                            if (!month) return;
+                            let mpId = row.mp_id;
+                            if (!mpId) mpId = await ensureMonthPosition(row.id, month);
+                            setEditing({ mpId, instrumentId: row.id, field: 'balance_brl', value: String(row.balance_brl ?? '') });
+                          }}>
+                          {editing?.instrumentId === row.id && editing.field === 'balance_brl' ? (
                             <input
                               autoFocus
                               className="w-28 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
@@ -362,8 +373,8 @@ export default function Positions() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, field: 'balance_usd', value: String(row.balance_usd ?? '') })}>
-                          {editing?.mpId === row.mp_id && editing.field === 'balance_usd' ? (
+                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, instrumentId: row.id, field: 'balance_usd', value: String(row.balance_usd ?? '') })}>
+                          {editing?.instrumentId === row.id && editing.field === 'balance_usd' ? (
                             <input
                               autoFocus
                               className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
@@ -386,8 +397,8 @@ export default function Positions() {
                           <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_12m)}`}>{fmtPct(row.return_12m)}</td>
                           <td className="px-3 py-2.5 text-center text-gray-500">{row.rank_1m ?? '—'}</td>
                         </>}
-                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, field: 'quantity', value: String(row.quantity ?? '') })}>
-                          {editing?.mpId === row.mp_id && editing.field === 'quantity' ? (
+                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, instrumentId: row.id, field: 'quantity', value: String(row.quantity ?? '') })}>
+                          {editing?.instrumentId === row.id && editing.field === 'quantity' ? (
                             <input
                               autoFocus
                               className="w-20 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"

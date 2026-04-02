@@ -402,6 +402,7 @@ InvestmentTracker/
 | POST | `/update-equities-prices?month=YYYY-MM` | Actualiza precios B3 via yfinance |
 | POST | `/update-usd-rate?month=YYYY-MM` | Actualiza cotización USD/BRL |
 | POST | `/recalculate-stats` | Recalcula current_balance_brl, portfolio_pct, rankings |
+| POST | `/ensure-month` | Crea MonthlyPosition vacía para instrument_id+month si no existe; retorna mp_id |
 
 ### `/api/history`
 | Método | Ruta | Descripción |

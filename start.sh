@@ -45,6 +45,10 @@ else
   echo "[2/4] Base de datos existente encontrada, omitiendo importación."
 fi
 
+# Apply DB migrations if needed
+echo "[2b] Aplicando migraciones de base de datos..."
+python3 migrate_fixed_income.py 2>/dev/null || true
+
 # Start backend in background
 echo "[3/4] Iniciando backend FastAPI en http://127.0.0.1:8000 ..."
 cd "$BACKEND"

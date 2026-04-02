@@ -44,8 +44,9 @@ export const INSTRUMENT_TYPE_LABELS: Record<string, string> = {
   accion: 'Acciones',
   fii: 'FIIs',
   fundo: 'Fondos',
-  exterior: 'Exterior',
   previdencia: 'Previdencia',
+  prestamos: 'Préstamos',
+  saving: 'Saving',
   fgts: 'FGTS',
   outro: 'Otro',
 };
@@ -55,8 +56,9 @@ export const INSTRUMENT_TYPE_COLORS: Record<string, string> = {
   accion: '#10b981',
   fii: '#f59e0b',
   fundo: '#8b5cf6',
-  exterior: '#ec4899',
   previdencia: '#06b6d4',
+  prestamos: '#ec4899',
+  saving: '#14b8a6',
   fgts: '#84cc16',
   outro: '#6b7280',
 };

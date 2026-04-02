@@ -1,12 +1,104 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional
+from datetime import date
+from dateutil.relativedelta import relativedelta
 from app.database import get_db
 from app.models.transaction import Transaction
 from app.models.instrument import Instrument
+from app.models.monthly_position import MonthlyPosition
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransactionOut
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+
+def _recompute_positions(db: Session, instrument_id: int, from_date: date):
+    """Recompute monthly position balances from from_date onwards based on transactions."""
+    month_start = from_date.replace(day=1)
+
+    # Find the balance at the end of the immediately preceding month
+    prev_pos = (
+        db.query(MonthlyPosition)
+        .filter(
+            MonthlyPosition.instrument_id == instrument_id,
+            MonthlyPosition.date < month_start,
+        )
+        .order_by(MonthlyPosition.date.desc())
+        .first()
+    )
+    prev_brl = (prev_pos.balance_brl or 0.0) if prev_pos else 0.0
+    prev_usd = (prev_pos.balance_usd or 0.0) if prev_pos else 0.0
+
+    # Get all months that have a position row from month_start onwards
+    future_positions = (
+        db.query(MonthlyPosition)
+        .filter(
+            MonthlyPosition.instrument_id == instrument_id,
+            MonthlyPosition.date >= month_start,
+        )
+        .order_by(MonthlyPosition.date.asc())
+        .all()
+    )
+
+    # Ensure current month has a position row
+    today_month = date.today().replace(day=1)
+    months_with_rows = {p.date for p in future_positions}
+    if month_start not in months_with_rows:
+        # Get usd_rate from the most recent position
+        last_pos = (
+            db.query(MonthlyPosition)
+            .filter(MonthlyPosition.instrument_id == instrument_id)
+            .order_by(MonthlyPosition.date.desc())
+            .first()
+        )
+        new_pos = MonthlyPosition(
+            instrument_id=instrument_id,
+            date=month_start,
+            balance_brl=0.0,
+            balance_usd=0.0,
+            usd_rate=last_pos.usd_rate if last_pos else None,
+        )
+        db.add(new_pos)
+        db.flush()
+        future_positions = (
+            db.query(MonthlyPosition)
+            .filter(
+                MonthlyPosition.instrument_id == instrument_id,
+                MonthlyPosition.date >= month_start,
+            )
+            .order_by(MonthlyPosition.date.asc())
+            .all()
+        )
+
+    running_brl = prev_brl
+    running_usd = prev_usd
+
+    for pos in future_positions:
+        m = pos.date
+        # Sum transactions for this month
+        txns = (
+            db.query(Transaction)
+            .filter(
+                Transaction.instrument_id == instrument_id,
+                func.strftime('%Y-%m', Transaction.date) == m.strftime('%Y-%m'),
+            )
+            .all()
+        )
+        net_brl = sum(
+            (t.amount_brl or 0) * (1 if t.type == 'aplicacion' else -1)
+            for t in txns if t.type in ('aplicacion', 'rescate')
+        )
+        net_usd = sum(
+            (t.amount_usd or 0) * (1 if t.type == 'aplicacion' else -1)
+            for t in txns if t.type in ('aplicacion', 'rescate') and t.amount_usd
+        )
+        running_brl = running_brl + net_brl
+        running_usd = running_usd + net_usd
+        pos.balance_brl = max(running_brl, 0.0)
+        pos.balance_usd = max(running_usd, 0.0) if running_usd else pos.balance_usd
+
+    db.commit()
 
 
 @router.get("")
@@ -67,6 +159,7 @@ def create_transaction(payload: TransactionCreate, db: Session = Depends(get_db)
     db.add(txn)
     db.commit()
     db.refresh(txn)
+    _recompute_positions(db, txn.instrument_id, txn.date)
     return {"id": txn.id, "message": "Transaccion creada"}
 
 
@@ -76,9 +169,11 @@ def update_transaction(txn_id: int, payload: TransactionUpdate, db: Session = De
     if not txn:
         raise HTTPException(status_code=404, detail="Transaccion no encontrada")
 
+    affected_date = payload.date or txn.date
     for k, v in payload.model_dump(exclude_none=True).items():
         setattr(txn, k, v)
     db.commit()
+    _recompute_positions(db, txn.instrument_id, affected_date)
     return {"message": "Transaccion actualizada"}
 
 
@@ -87,5 +182,7 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_db)):
     txn = db.query(Transaction).filter_by(id=txn_id).first()
     if not txn:
         raise HTTPException(status_code=404, detail="Transaccion no encontrada")
+    instrument_id, txn_date = txn.instrument_id, txn.date
     db.delete(txn)
     db.commit()
+    _recompute_positions(db, instrument_id, txn_date)

@@ -61,22 +61,29 @@ def safe_float(val: Any) -> Optional[float]:
         return None
 
 
+def _is_exterior(name: str, custodian: str) -> bool:
+    """Return True if the instrument is custodied abroad."""
+    n = name.upper()
+    c = custodian.upper()
+    return (
+        any(k in n for k in ["USA", "CITI", "DOLLAR", "DOLAR", "MDQ", "DEITRES", "SUNNYHUB"])
+        or c in ["CITI", "CITI USA", "ALLARIA", "MDQ", "DEITRES"]
+    )
+
+
 def classify_instrument_type(name: str, custodian: str) -> str:
     """Classify instrument type based on name patterns."""
     n = name.upper()
-    c = custodian.upper()
 
     if any(k in n for k in ["PREV", "PREVIDENCIA", "PREVIDÊNCIA"]):
         return "previdencia"
     if "FGTS" in n:
         return "fgts"
-    if any(k in n for k in ["USA", "CITI", "DOLLAR", "DOLAR"]) or c in ["CITI", "CITI USA"]:
-        return "exterior"
     if any(n.startswith(k) for k in ["PETR", "VALE", "ITUB", "BBAS", "ABEV"]) or (
         len(n) == 5 and n[-1].isdigit() and not any(k in n for k in ["CDB", "LCA", "LCI", "CRI", "CRA", "DEB"])
     ):
         return "accion"
-    if any(k in n for k in ["BVMF", "B3SA", "B3 SA"]):
+    if any(k in n for k in ["BVMF", "B3SA", "B3 SA", "ETF"]):
         return "accion"
     if any(n.endswith(k) for k in ["11", "12"]) and len(n.split()) == 1:
         return "fii"
@@ -84,15 +91,14 @@ def classify_instrument_type(name: str, custodian: str) -> str:
         return "fii"
     if any(k in n for k in ["CDB", "LCA", "LCI", "NTNB", "NTN-B", "LFT", "LTN",
                               "CRI", "CRA", "DEB", "TESOURO", "TREASURY", "TD SELIC",
-                              "IPCA +", "LIG", "LETRA"]):
+                              "IPCA +", "LIG", "LETRA", "US TRES", "US EMBRAER",
+                              "US MARFRIG", "US PETRO", "US REDE", "AL30", "MEP"]):
         return "renta_fija"
     if any(k in n for k in ["FIC", "FICFI", "FIM", "FI RF", "FI DI", "FUNDO",
                               "TREND", "PORTO DI", "ADAM", "WESTERN", "PIMCO",
                               "POLO", "VERDE", "MODAL", "BAHIA", "ENDURANCE",
-                              "BTG EXPLORER", "MACRO", "SELECTION"]):
+                              "BTG EXPLORER", "MACRO", "SELECTION", "CAMBIAL"]):
         return "fundo"
-    if "MDQ" in n or "DEITRES" in n or "SUNNYHUB" in n:
-        return "exterior"
     return "outro"
 
 
@@ -100,11 +106,13 @@ def get_or_create_instrument(db: Session, name: str, custodian: str) -> Instrume
     """Get existing instrument or create a new one."""
     inst = db.query(Instrument).filter_by(name=name, custodian=custodian).first()
     if not inst:
+        is_ext = _is_exterior(name, custodian)
         inst = Instrument(
             name=name,
             custodian=custodian,
             type=classify_instrument_type(name, custodian),
-            currency="USD" if classify_instrument_type(name, custodian) == "exterior" else "BRL",
+            location="exterior" if is_ext else "brasil",
+            currency="USD" if is_ext else "BRL",
         )
         db.add(inst)
         db.flush()
@@ -150,10 +158,13 @@ def import_saldos(df: pd.DataFrame, db: Session, warnings: list, errors: list) -
 
             inst = get_or_create_instrument(db, fondo, banco)
 
+            balance_usd = safe_float(row.get("Saldo USD"))
+            usd_rate = safe_float(row.get("Cot USD"))
+
             data = {
                 "balance_brl": saldo_brl,
-                "balance_usd": safe_float(row.get("Saldo USD")),
-                "usd_rate": safe_float(row.get("Cot USD")),
+                "balance_usd": balance_usd,
+                "usd_rate": usd_rate,
                 "applications": safe_float(row.get("Aplicaciones")),
                 "redemptions": safe_float(row.get("Rescates")),
                 "calculated_balance": safe_float(row.get("Saldo calculado")),
@@ -163,6 +174,10 @@ def import_saldos(df: pd.DataFrame, db: Session, warnings: list, errors: list) -
                 "proventos": safe_float(row.get("Proventos")),
                 "avg_price": safe_float(row.get("Preço médio")),
             }
+
+            if inst.type in ("accion", "fii"):
+                data["quantity"] = balance_usd
+                data["unit_price"] = usd_rate
 
             upsert_position(db, inst.id, pos_date, data)
             count += 1
@@ -539,6 +554,19 @@ def import_excel(filepath: str, db: Session) -> dict:
 
     # Update instrument statuses
     update_instrument_statuses(db)
+
+    # Backfill balance_usd = balance_brl / usd_rate for positions missing it
+    db.execute(
+        """
+        UPDATE monthly_positions
+        SET balance_usd = ROUND(balance_brl / ps.usd_rate, 2)
+        FROM (SELECT date, usd_rate FROM portfolio_snapshots WHERE usd_rate IS NOT NULL AND usd_rate > 0) ps
+        WHERE monthly_positions.date = ps.date
+          AND monthly_positions.balance_usd IS NULL
+          AND monthly_positions.balance_brl IS NOT NULL
+          AND monthly_positions.balance_brl > 0
+        """
+    )
 
     db.commit()
     return report

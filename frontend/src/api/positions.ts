@@ -4,12 +4,15 @@ export interface PositionFilters {
   custodian?: string;
   type?: string;
   currency?: string;
+  location?: string;
   status?: string;
   search?: string;
+  month?: string;
   sort?: string;
   order?: string;
   page?: number;
   limit?: number;
+  with_position?: boolean;
 }
 
 export const getPositions = (filters: PositionFilters = {}) =>

@@ -7,23 +7,29 @@
   body {
     font-family: Inter, system-ui, Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
-    @apply bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100;
+    @apply bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100;
   }
 }
 
 @layer components {
   .card {
-    @apply bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-5;
+    @apply bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 p-5;
   }
   .btn-primary {
-    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer;
+    @apply bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-medium px-4 py-2 rounded-xl transition-all cursor-pointer shadow-sm hover:shadow-md;
   }
   .btn-secondary {
-    @apply bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer;
+    @apply bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-medium px-4 py-2 rounded-xl transition-all cursor-pointer;
+  }
+  .btn-ghost {
+    @apply hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 font-medium px-3 py-2 rounded-xl transition-all cursor-pointer;
   }
   .input {
-    @apply border border-gray-300 dark:border-gray-700 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 w-full;
+    @apply border border-slate-200 dark:border-slate-700 rounded-xl px-3 py-2 bg-white dark:bg-slate-800/60 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-400 dark:focus:border-indigo-500 w-full transition-all placeholder:text-slate-400 dark:placeholder:text-slate-500;
   }
-  .positive { @apply text-emerald-600 dark:text-emerald-400 font-medium; }
-  .negative { @apply text-red-500 dark:text-red-400 font-medium; }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-medium;
+  }
+  .positive { @apply text-emerald-600 dark:text-emerald-400 font-semibold; }
+  .negative { @apply text-rose-500 dark:text-rose-400 font-semibold; }
 }

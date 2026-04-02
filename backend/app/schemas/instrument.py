@@ -18,15 +18,31 @@ class InstrumentCreate(InstrumentBase):
 
 
 class InstrumentUpdate(BaseModel):
+    name: Optional[str] = None
+    custodian: Optional[str] = None
+    ticker: Optional[str] = None
     type: Optional[str] = None
+    location: Optional[str] = None
     currency: Optional[str] = None
     maturity_date: Optional[date] = None
+    issue_date: Optional[date] = None
+    index_type: Optional[str] = None
+    asset_class: Optional[str] = None
     liquidity: Optional[str] = None
     status: Optional[str] = None
+    in_liquidation: Optional[bool] = None
+    pays_dividends: Optional[bool] = None
 
 
 class InstrumentOut(InstrumentBase):
     id: int
+    location: Optional[str] = None
+    ticker: Optional[str] = None
+    issue_date: Optional[date] = None
+    index_type: Optional[str] = None
+    asset_class: Optional[str] = None
+    in_liquidation: Optional[bool] = None
+    pays_dividends: Optional[bool] = None
     rank_1m: Optional[int] = None
     rank_3m: Optional[int] = None
     rank_6m: Optional[int] = None

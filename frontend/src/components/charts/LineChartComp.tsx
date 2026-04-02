@@ -37,7 +37,7 @@ export default function LineChartComp({ data, series, xKey, height = 320, pct = 
         <Tooltip
           formatter={(val: any, name: any) => [pct ? `${(val * 100).toFixed(2)}%` : fmtBRL(val), name]}
           labelFormatter={label => fmtDate(label)}
-          contentStyle={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }}
+          contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
         />
         <Legend iconSize={10} formatter={v => <span style={{ fontSize: 12, color: '#6b7280' }}>{v}</span>} />
         {series.map((s, i) => (

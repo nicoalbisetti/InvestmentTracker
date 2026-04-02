@@ -5,4 +5,12 @@ const client = axios.create({
   timeout: 30000,
 });
 
+client.interceptors.request.use(config => {
+  const env = localStorage.getItem('app_env') || 'production';
+  if (env === 'demo') {
+    config.headers['X-Env'] = 'demo';
+  }
+  return config;
+});
+
 export default client;
