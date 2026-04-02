@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { getPositions, exportPositions, PositionFilters } from '../api/positions';
 import { fmtBRL, fmtPct, fmtDate, INSTRUMENT_TYPE_LABELS } from '../utils/formatters';
 import { SkeletonTable } from '../components/ui/SkeletonLoader';
+import { getLastFixedIncomeDate } from '../api/importFixedIncome';
+import client from '../api/client';
 
 const TYPE_OPTIONS = Object.entries(INSTRUMENT_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }));
 const STATUS_OPTIONS = [
@@ -19,11 +22,34 @@ function colorReturn(val: number | null) {
   return val >= 0 ? 'positive' : 'negative';
 }
 
+const MONTH_NAMES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+
+function fmtLastDate(d: string | null) {
+  if (!d) return null;
+  const [year, month] = d.split('-');
+  return `${MONTH_NAMES_ES[parseInt(month) - 1]} ${year}`;
+}
+
 export default function Positions() {
-  const [data, setData] = useState<any>({ items: [], total: 0, pages: 1 });
+  const navigate = useNavigate();
+  const [data, setData] = useState<any>({ items: [], total: 0, pages: 1, total_brl: null, total_usd: null });
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState<PositionFilters>({ status: 'activo', sort: 'current_balance_brl', order: 'desc', page: 1, limit: 50 });
+  const [filters, setFilters] = useState<PositionFilters>({ status: 'activo', sort: 'default', order: 'asc', page: 1, limit: 50, with_position: true });
   const [search, setSearch] = useState('');
+  const [lastFixedIncomeDate, setLastFixedIncomeDate] = useState<string | null>(null);
+  const [updatingPrices, setUpdatingPrices] = useState(false);
+  const [priceResult, setPriceResult] = useState<any>(null);
+  const [updatingUsd, setUpdatingUsd] = useState(false);
+  const [usdResult, setUsdResult] = useState<any>(null);
+  const currentMonth = new Date().toISOString().slice(0, 7);
+  const [priceMonth, setPriceMonth] = useState(currentMonth);
+  const isHistorical = priceMonth !== currentMonth;
+  const [editing, setEditing] = useState<{ mpId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
+  const [showReturns, setShowReturns] = useState(true);
+
+  useEffect(() => {
+    getLastFixedIncomeDate().then(r => setLastFixedIncomeDate(r.date)).catch(() => {});
+  }, []);
 
   const load = (f: PositionFilters) => {
     setLoading(true);
@@ -31,9 +57,19 @@ export default function Positions() {
   };
 
   useEffect(() => {
-    const timer = setTimeout(() => load({ ...filters, search: search || undefined }), 300);
+    const month = priceMonth !== currentMonth ? priceMonth : undefined;
+    const timer = setTimeout(() => load({ ...filters, search: search || undefined, month }), 300);
     return () => clearTimeout(timer);
-  }, [filters, search]);
+  }, [filters, search, priceMonth]);
+
+  const saveBalance = async (mpId: number, field: 'balance_brl' | 'balance_usd' | 'quantity', value: string) => {
+    const num = parseFloat(value.replace(',', '.'));
+    if (isNaN(num)) { setEditing(null); return; }
+    await client.patch(`/api/positions/${mpId}/balance`, { [field]: num });
+    setEditing(null);
+    const month = priceMonth !== currentMonth ? priceMonth : undefined;
+    load({ ...filters, search: search || undefined, month });
+  };
 
   const setSort = (col: string) => {
     setFilters(f => ({
@@ -86,14 +122,109 @@ export default function Positions() {
           {TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
         <select
+          className="input w-36"
+          value={filters.location || ''}
+          onChange={e => setFilters(f => ({ ...f, location: e.target.value || undefined, page: 1 }))}
+        >
+          <option value="">Todas las ubicaciones</option>
+          <option value="brasil">Brasil</option>
+          <option value="exterior">Exterior</option>
+        </select>
+        <select
           className="input w-32"
           value={filters.status || 'activo'}
           onChange={e => setFilters(f => ({ ...f, status: e.target.value || undefined, page: 1 }))}
         >
           {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        <div className="ml-auto flex items-center gap-2">
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-blue-600"
+            checked={filters.with_position ?? true}
+            onChange={e => setFilters(f => ({ ...f, with_position: e.target.checked, page: 1 }))}
+          />
+          Con posición
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="w-4 h-4 accent-blue-600"
+            checked={showReturns}
+            onChange={e => setShowReturns(e.target.checked)}
+          />
+          Rendimientos
+        </label>
+        <div className="ml-auto flex items-center gap-2 flex-wrap">
+          {lastFixedIncomeDate && (
+            <span className="text-xs bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 px-2.5 py-1 rounded-full border border-blue-200 dark:border-blue-800">
+              Último extrato: {fmtLastDate(lastFixedIncomeDate)}
+            </span>
+          )}
           <span className="text-sm text-gray-500">{data.total} instrumentos</span>
+          <div className="flex items-center gap-1">
+            {isHistorical && (
+              <span className="text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-2 py-1 rounded-full border border-amber-200 dark:border-amber-700 whitespace-nowrap">
+                Vista histórica
+              </span>
+            )}
+            <input
+              type="month"
+              className={`input text-sm py-1 ${isHistorical ? 'border-amber-400 dark:border-amber-600' : ''}`}
+              value={priceMonth}
+              onChange={e => setPriceMonth(e.target.value)}
+            />
+            <button
+              className="btn-secondary text-sm disabled:opacity-50"
+              disabled={updatingPrices}
+              onClick={async () => {
+                setUpdatingPrices(true);
+                setPriceResult(null);
+                try {
+                  const r = await client.post('/api/positions/update-equities-prices', null, { params: { month: priceMonth } });
+                  setPriceResult(r.data);
+                  load({ ...filters, search: search || undefined });
+                } finally {
+                  setUpdatingPrices(false);
+                }
+              }}
+            >
+              {updatingPrices ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full" />
+                  Actualizando...
+                </span>
+              ) : 'Actualizar precios RV'}
+            </button>
+            <button
+              className="btn-secondary text-sm disabled:opacity-50"
+              disabled={updatingUsd || isHistorical}
+              title={isHistorical ? 'Solo disponible para el mes actual' : undefined}
+              onClick={async () => {
+                setUpdatingUsd(true);
+                setUsdResult(null);
+                try {
+                  const r = await client.post('/api/positions/update-usd-rate', null, { params: { month: priceMonth } });
+                  setUsdResult(r.data);
+                } finally {
+                  setUpdatingUsd(false);
+                }
+              }}
+            >
+              {updatingUsd ? (
+                <span className="flex items-center gap-1.5">
+                  <span className="animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full" />
+                  Actualizando...
+                </span>
+              ) : 'Actualizar USD'}
+            </button>
+          </div>
+          <button
+            className="btn-secondary text-sm"
+            onClick={() => navigate('/import/fixed-income')}
+          >
+            Importar Extracto B3
+          </button>
           <button
             className="btn-secondary text-sm"
             onClick={() => exportPositions({ ...filters, search: search || undefined })}
@@ -102,6 +233,79 @@ export default function Positions() {
           </button>
         </div>
       </div>
+
+      {/* USD rate update result */}
+      {usdResult && (
+        <div className="card">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 text-sm">
+              {usdResult.updated ? (
+                <>
+                  <span className="font-semibold text-slate-700 dark:text-slate-200">Dólar actualizado</span>
+                  <span className="text-slate-500">{usdResult.month}</span>
+                  {usdResult.old_rate && <span className="text-slate-400">R$ {usdResult.old_rate.toFixed(4)} →</span>}
+                  <span className="font-semibold text-emerald-600">R$ {usdResult.new_rate.toFixed(4)}</span>
+                </>
+              ) : (
+                <span className="text-rose-500">{usdResult.error}</span>
+              )}
+            </div>
+            <button className="text-slate-400 hover:text-slate-600 text-xs" onClick={() => setUsdResult(null)}>✕</button>
+          </div>
+        </div>
+      )}
+
+      {/* Price update result */}
+      {priceResult && (
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 text-sm">
+              <span className="font-semibold text-slate-700 dark:text-slate-200">Precios B3 actualizados</span>
+              <span className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 px-2 py-0.5 rounded-full text-xs font-medium">{priceResult.updated} actualizados</span>
+              {priceResult.skipped > 0 && <span className="bg-slate-100 text-slate-500 dark:bg-slate-700 px-2 py-0.5 rounded-full text-xs">{priceResult.skipped} sin precio</span>}
+            </div>
+            <button className="text-slate-400 hover:text-slate-600 text-xs" onClick={() => setPriceResult(null)}>✕</button>
+          </div>
+          {priceResult.prices?.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-slate-400 uppercase">
+                    <th className="text-left py-1 pr-4">Ticker</th>
+                    <th className="text-right pr-4">Cantidad</th>
+                    <th className="text-right pr-4">Precio ant.</th>
+                    <th className="text-right pr-4">Precio actual</th>
+                    <th className="text-right pr-4">Variación</th>
+                    <th className="text-right pr-4">Saldo anterior</th>
+                    <th className="text-right">Saldo nuevo</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {priceResult.prices.map((p: any) => (
+                    <tr key={p.ticker}>
+                      <td className="py-1.5 pr-4 font-mono font-semibold">{p.ticker}</td>
+                      <td className="py-1.5 pr-4 text-right text-slate-500">{p.quantity?.toLocaleString('pt-BR')}</td>
+                      <td className="py-1.5 pr-4 text-right text-slate-500">{p.ref_price != null ? `R$ ${p.ref_price.toFixed(2)}` : '—'}</td>
+                      <td className="py-1.5 pr-4 text-right font-medium">R$ {p.current_price.toFixed(2)}</td>
+                      <td className={`py-1.5 pr-4 text-right font-semibold ${p.change_pct == null ? 'text-slate-400' : p.change_pct >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                        {p.change_pct != null ? `${p.change_pct >= 0 ? '+' : ''}${p.change_pct.toFixed(2)}%` : '—'}
+                      </td>
+                      <td className="py-1.5 pr-4 text-right text-slate-400">{fmtBRL(p.old_balance)}</td>
+                      <td className="py-1.5 text-right font-medium">{fmtBRL(p.new_balance)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          {priceResult.errors?.length > 0 && (
+            <details className="text-xs text-slate-400">
+              <summary className="cursor-pointer">{priceResult.errors.length} sin actualizar</summary>
+              <ul className="mt-1 space-y-0.5 pl-2">{priceResult.errors.map((e: string, i: number) => <li key={i}>{e}</li>)}</ul>
+            </details>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       <div className="card p-0 overflow-hidden">
@@ -117,14 +321,14 @@ export default function Positions() {
                     <TH col="custodian" label="Custodio" />
                     <TH col="type" label="Tipo" />
                     <TH col="current_balance_brl" label="Saldo BRL" />
+                    <TH col="balance_usd" label="Saldo USD" />
                     <TH col="portfolio_pct" label="% Portfolio" />
-                    <TH col="return_1m" label="1M%" />
-                    <TH col="return_3m" label="3M%" />
-                    <TH col="return_6m" label="6M%" />
-                    <TH col="return_12m" label="12M%" />
-                    <TH col="rank_1m" label="Rank" />
-                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Liquidez</th>
+                    {showReturns && <><TH col="return_1m" label="1M%" /><TH col="return_3m" label="3M%" /><TH col="return_6m" label="6M%" /><TH col="return_12m" label="12M%" /><TH col="rank_1m" label="Rank" /></>}
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Cantidad</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Precio actual</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap">Precio medio</th>
                     <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Vencimiento</th>
+                    <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
@@ -138,24 +342,106 @@ export default function Positions() {
                           <span className="text-xs bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">
                             {INSTRUMENT_TYPE_LABELS[row.type] || row.type}
                           </span>
+                          {row.in_liquidation && (
+                            <span className="ml-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 px-1.5 py-0.5 rounded-full">Em liquidação</span>
+                          )}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-gray-800 dark:text-gray-200">{fmtBRL(row.balance_brl)}</td>
+                        <td className="px-3 py-2 font-mono text-gray-800 dark:text-gray-200 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, field: 'balance_brl', value: String(row.balance_brl ?? '') })}>
+                          {editing?.mpId === row.mp_id && editing.field === 'balance_brl' ? (
+                            <input
+                              autoFocus
+                              className="w-28 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
+                              value={editing.value}
+                              onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
+                              onBlur={() => saveBalance(editing.mpId, editing.field, editing.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, editing.field, editing.value); if (e.key === 'Escape') setEditing(null); }}
+                            />
+                          ) : (
+                            <span className="group-hover:underline decoration-dotted">
+                              {row.balance_brl == null && row.type === 'renta_fija' ? <span className="text-xs text-gray-400 italic">Sin precio</span> : fmtBRL(row.balance_brl)}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, field: 'balance_usd', value: String(row.balance_usd ?? '') })}>
+                          {editing?.mpId === row.mp_id && editing.field === 'balance_usd' ? (
+                            <input
+                              autoFocus
+                              className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
+                              value={editing.value}
+                              onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
+                              onBlur={() => saveBalance(editing.mpId, editing.field, editing.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, editing.field, editing.value); if (e.key === 'Escape') setEditing(null); }}
+                            />
+                          ) : (
+                            <span className="group-hover:underline decoration-dotted">
+                              {row.balance_usd != null ? row.balance_usd.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '—'}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400">{fmtPct(row.portfolio_pct)}</td>
-                        <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_1m)}`}>{fmtPct(row.return_1m)}</td>
-                        <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_3m)}`}>{fmtPct(row.return_3m)}</td>
-                        <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_6m)}`}>{fmtPct(row.return_6m)}</td>
-                        <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_12m)}`}>{fmtPct(row.return_12m)}</td>
-                        <td className="px-3 py-2.5 text-center text-gray-500">{row.rank_1m ?? '—'}</td>
-                        <td className="px-3 py-2.5 text-gray-500">{row.liquidity || '—'}</td>
+                        {showReturns && <>
+                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_1m)}`}>{fmtPct(row.return_1m)}</td>
+                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_3m)}`}>{fmtPct(row.return_3m)}</td>
+                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_6m)}`}>{fmtPct(row.return_6m)}</td>
+                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_12m)}`}>{fmtPct(row.return_12m)}</td>
+                          <td className="px-3 py-2.5 text-center text-gray-500">{row.rank_1m ?? '—'}</td>
+                        </>}
+                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, field: 'quantity', value: String(row.quantity ?? '') })}>
+                          {editing?.mpId === row.mp_id && editing.field === 'quantity' ? (
+                            <input
+                              autoFocus
+                              className="w-20 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
+                              value={editing.value}
+                              onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
+                              onBlur={() => saveBalance(editing.mpId, editing.field, editing.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, editing.field, editing.value); if (e.key === 'Escape') setEditing(null); }}
+                            />
+                          ) : (
+                            <span className="group-hover:underline decoration-dotted">
+                              {row.quantity != null ? row.quantity.toLocaleString('pt-BR') : '—'}
+                            </span>
+                          )}
+                        </td>
+                        <td className={`px-3 py-2.5 font-mono text-sm ${
+                          row.unit_price == null ? 'text-gray-400' :
+                          row.avg_price == null ? 'text-gray-600 dark:text-gray-400' :
+                          row.unit_price >= row.avg_price ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'
+                        }`}>
+                          {row.unit_price != null ? row.unit_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        </td>
+                        <td className="px-3 py-2.5 font-mono text-sm text-gray-500">
+                          {row.avg_price != null ? row.avg_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        </td>
                         <td className={`px-3 py-2.5 ${nearMaturity ? 'text-amber-500 font-semibold' : 'text-gray-500'}`}>
                           {fmtDate(row.maturity_date)}
                           {nearMaturity && <span className="ml-1 text-xs">⚠️</span>}
                         </td>
+                        {(row.type === 'accion' || row.type === 'fii') && (
+                          <td className="px-3 py-2.5">
+                            <Link
+                              to={`/equity-trades?instrument_id=${row.id}`}
+                              className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
+                            >
+                              Ver operaciones
+                            </Link>
+                          </td>
+                        )}
+                        {row.type !== 'accion' && row.type !== 'fii' && <td />}
                       </tr>
                     );
                   })}
                   {data.items.length === 0 && (
                     <tr><td colSpan={12} className="px-3 py-8 text-center text-gray-400">No hay instrumentos</td></tr>
+                  )}
+                  {data.items.length > 0 && (
+                    <tr className="bg-gray-50 dark:bg-gray-800/70 border-t-2 border-gray-200 dark:border-gray-600 font-semibold">
+                      <td className="px-3 py-2.5 text-xs text-gray-500 uppercase" colSpan={3}>Total</td>
+                      <td className="px-3 py-2.5 font-mono text-gray-800 dark:text-gray-200">{fmtBRL(data.total_brl)}</td>
+                      <td className="px-3 py-2.5 font-mono text-gray-600 dark:text-gray-400">
+                        {data.total_usd != null ? data.total_usd.toLocaleString('pt-BR', { maximumFractionDigits: 0 }) : '—'}
+                      </td>
+                      <td colSpan={showReturns ? 10 : 5} />
+                    </tr>
                   )}
                 </tbody>
               </table>
