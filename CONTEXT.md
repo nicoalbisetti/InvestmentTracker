@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 1 Abr 2026 (tarde).
+> Refleja el estado REAL del código al 2 Abr 2026.
 
 ---
 
@@ -359,6 +359,25 @@ InvestmentTracker/
 
 ---
 
+### EquityTrade — `equity_trades`
+| Campo | Tipo | Nullable |
+|---|---|---|
+| id | INTEGER PK, autoincrement | NO |
+| instrument_id | FK → instruments, indexed | NO |
+| date | Date, indexed | NO — fecha exacta de la operación |
+| trade_type | String(10) | NO — "compra" \| "venta" |
+| quantity | Float | NO — siempre positivo |
+| price | Float | NO — precio unitario en BRL (o USD si currency=USD) |
+| amount_brl | Float | SI — calculado como quantity × price al guardar |
+| notes | Text | SI |
+| created_at | DateTime | NO |
+
+> Sin UNIQUE constraint: se permiten múltiples operaciones del mismo instrumento el mismo día.
+> Al crear/editar/eliminar un EquityTrade se recalcutan las MonthlyPosition desde el mes de la
+> operación en adelante via `equity_recalculate.recalculate_equity_positions()`.
+
+---
+
 ## 5. Endpoints Implementados
 
 ### `/api/dashboard`
@@ -450,6 +469,18 @@ InvestmentTracker/
 | POST | `/confirm` | Aplica import |
 | POST | `/map-instrument` | Mapeo manual de instrumento |
 
+### `/api/equity-trades`
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/?instrument_id&date_from&date_to&trade_type&page&limit` | Lista paginada con EquityTradeOut (incluye instrument_name, ticker) |
+| POST | `/` | Crea operación, calcula amount_brl, dispara recálculo; retorna + recalculated_months, affected_from |
+| GET | `/{id}` | Detalle de una operación |
+| PUT | `/{id}` | Edita operación, recalcula desde min(date_anterior, date_nueva) |
+| DELETE | `/{id}` | Elimina + recalcula; status 204 |
+| GET | `/summary/{instrument_id}` | Resumen: qty_actual, avg_price_compra, ultimo_precio, pl_no_realizado, pl_no_realizado_pct |
+
+---
+
 ### `/api/quotes`
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -515,6 +546,16 @@ Soporta cross-custodio, mapeo manual de instrumentos.
 ### ImportProventos (`/import/proventos`)
 Wizard similar para importar proventos pagados desde Excel de XP/Santander.
 **API:** `/api/import/proventos/*`
+
+### EquityTrades (`/equity-trades`)
+Registro de compras y ventas de acciones/FIIs/ETFs. Sección superior: formulario nueva operación
+(autocomplete instrumento, toggle compra/venta, date picker, cantidad, precio, monto calculado, notas).
+Sección inferior: historial con filtros (instrumento, rango fechas, tipo), tabla con badge verde/rojo
+por tipo, paginación. Modal de edición, AlertDialog de eliminación con fecha afectada.
+Al seleccionar instrumento en filtro: muestra EquityTradeSummaryCard (qty actual, avg_price, último
+precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalculados.
+**API:** `/api/equity-trades/*`
+**Link desde Positions:** botón "Ver operaciones" en filas de tipo accion/fii.
 
 ---
 
@@ -616,6 +657,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Actualización USD/BRL via yfinance
 - [x] Cotizaciones manuales
 - [x] Benchmarks CDI/IPCA con caché local (BCB API)
+- [x] Operaciones de Renta Variable: registro compras/ventas, recálculo automático de MonthlyPosition (quantity, balance_brl, avg_price), historial, card resumen P&L
 - [x] Modo Demo (X-Env header → demo_engine)
 - [x] Toggle Demo/Real en UI (sidebar)
 - [x] Dark/Light theme

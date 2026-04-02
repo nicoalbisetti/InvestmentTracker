@@ -225,6 +225,9 @@ GET  /api/import/history              # Historial de importaciones
 12. Pagina Dashboard con todos sus componentes
 13. Pagina Posiciones con tabla ordenable y filtros
 
+### Fase 7 — Features adicionales
+- [x] Operaciones de Renta Variable — registro de compras/ventas, recálculo de posiciones, historial con P&L
+
 ### Fase 4 — Frontend resto de paginas
 14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)
 15. Analisis Anual
