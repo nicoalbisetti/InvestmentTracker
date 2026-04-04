@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { CopyPlus, Activity, DollarSign, Loader2, Upload, Globe, Download } from 'lucide-react';
 import { getPositions, exportPositions, PositionFilters } from '../api/positions';
 import { fmtBRL, fmtPct, fmtDate, INSTRUMENT_TYPE_LABELS } from '../utils/formatters';
 import { SkeletonTable } from '../components/ui/SkeletonLoader';
@@ -41,11 +42,12 @@ export default function Positions() {
   const [priceResult, setPriceResult] = useState<any>(null);
   const [updatingUsd, setUpdatingUsd] = useState(false);
   const [usdResult, setUsdResult] = useState<any>(null);
+  const [copyingPrev, setCopyingPrev] = useState(false);
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [priceMonth, setPriceMonth] = useState(currentMonth);
   const isHistorical = priceMonth !== currentMonth;
   const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
-  const [showReturns, setShowReturns] = useState(true);
+  const [showReturns, setShowReturns] = useState(false);
 
   useEffect(() => {
     getLastFixedIncomeDate().then(r => setLastFixedIncomeDate(r.date)).catch(() => {});
@@ -179,62 +181,85 @@ export default function Positions() {
               value={priceMonth}
               onChange={e => setPriceMonth(e.target.value)}
             />
-            <button
-              className="btn-secondary text-sm disabled:opacity-50"
-              disabled={updatingPrices}
-              onClick={async () => {
-                setUpdatingPrices(true);
-                setPriceResult(null);
-                try {
-                  const r = await client.post('/api/positions/update-equities-prices', null, { params: { month: priceMonth } });
-                  setPriceResult(r.data);
-                  load({ ...filters, search: search || undefined });
-                } finally {
-                  setUpdatingPrices(false);
-                }
-              }}
-            >
-              {updatingPrices ? (
-                <span className="flex items-center gap-1.5">
-                  <span className="animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full" />
-                  Actualizando...
-                </span>
-              ) : 'Actualizar precios RV'}
-            </button>
-            <button
-              className="btn-secondary text-sm disabled:opacity-50"
-              disabled={updatingUsd || isHistorical}
-              title={isHistorical ? 'Solo disponible para el mes actual' : undefined}
-              onClick={async () => {
-                setUpdatingUsd(true);
-                setUsdResult(null);
-                try {
-                  const r = await client.post('/api/positions/update-usd-rate', null, { params: { month: priceMonth } });
-                  setUsdResult(r.data);
-                } finally {
-                  setUpdatingUsd(false);
-                }
-              }}
-            >
-              {updatingUsd ? (
-                <span className="flex items-center gap-1.5">
-                  <span className="animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full" />
-                  Actualizando...
-                </span>
-              ) : 'Actualizar USD'}
-            </button>
+            <span title="Copiar instrumentos activos del mes anterior">
+              <button
+                className="btn-secondary p-2 disabled:opacity-50 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                disabled={copyingPrev}
+                onClick={async () => {
+                  setCopyingPrev(true);
+                  try {
+                    const r = await client.post('/api/positions/copy-previous-month', { target_month: priceMonth });
+                    const month = priceMonth !== currentMonth ? priceMonth : undefined;
+                    load({ ...filters, search: search || undefined, month });
+                    alert(`Se copiaron ${r.data.copied} posiciones faltantes del mes anterior.`);
+                  } catch (e) {
+                    alert('Error copiando posiciones');
+                  } finally {
+                    setCopyingPrev(false);
+                  }
+                }}
+              >
+                {copyingPrev ? <Loader2 size={18} className="animate-spin" /> : <CopyPlus size={18} />}
+              </button>
+            </span>
+            <span title="Actualizar precios de Renta Variable">
+              <button
+                className="btn-secondary p-2 disabled:opacity-50 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                disabled={updatingPrices}
+                onClick={async () => {
+                  setUpdatingPrices(true);
+                  setPriceResult(null);
+                  try {
+                    const r = await client.post('/api/positions/update-equities-prices', null, { params: { month: priceMonth } });
+                    setPriceResult(r.data);
+                    load({ ...filters, search: search || undefined });
+                  } finally {
+                    setUpdatingPrices(false);
+                  }
+                }}
+              >
+                {updatingPrices ? <Loader2 size={18} className="animate-spin" /> : <Activity size={18} />}
+              </button>
+            </span>
+            <span title={isHistorical ? 'Solo disponible para el mes actual' : 'Actualizar cotización USD/BRL'}>
+              <button
+                className="btn-secondary p-2 disabled:opacity-50 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                disabled={updatingUsd || isHistorical}
+                onClick={async () => {
+                  setUpdatingUsd(true);
+                  setUsdResult(null);
+                  try {
+                    const r = await client.post('/api/positions/update-usd-rate', null, { params: { month: priceMonth } });
+                    setUsdResult(r.data);
+                  } finally {
+                    setUpdatingUsd(false);
+                  }
+                }}
+              >
+                {updatingUsd ? <Loader2 size={18} className="animate-spin" /> : <DollarSign size={18} />}
+              </button>
+            </span>
           </div>
           <button
-            className="btn-secondary text-sm"
+            className="btn-secondary text-sm p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
             onClick={() => navigate('/import/fixed-income')}
+            title="Importar Extracto B3"
           >
-            Importar Extracto B3
+            <Upload size={18} />
           </button>
           <button
-            className="btn-secondary text-sm"
-            onClick={() => exportPositions({ ...filters, search: search || undefined })}
+            className="btn-secondary text-sm p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            onClick={() => navigate('/import/international')}
+            title="Importar Internacional"
           >
-            Exportar CSV
+            <Globe size={18} />
+          </button>
+          <button
+            className="btn-secondary text-sm p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            onClick={() => exportPositions({ ...filters, search: search || undefined })}
+            title="Exportar CSV"
+          >
+            <Download size={18} />
           </button>
         </div>
       </div>
@@ -352,10 +377,8 @@ export default function Positions() {
                           )}
                         </td>
                         <td className="px-3 py-2 font-mono text-gray-800 dark:text-gray-200 cursor-pointer group" onClick={async () => {
-                            const month = priceMonth !== currentMonth ? priceMonth : undefined;
-                            if (!month) return;
                             let mpId = row.mp_id;
-                            if (!mpId) mpId = await ensureMonthPosition(row.id, month);
+                            if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
                             setEditing({ mpId, instrumentId: row.id, field: 'balance_brl', value: String(row.balance_brl ?? '') });
                           }}>
                           {editing?.instrumentId === row.id && editing.field === 'balance_brl' ? (
@@ -373,7 +396,12 @@ export default function Positions() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, instrumentId: row.id, field: 'balance_usd', value: String(row.balance_usd ?? '') })}>
+                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group"
+                          onClick={async () => {
+                            let mpId = row.mp_id;
+                            if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
+                            setEditing({ mpId, instrumentId: row.id, field: 'balance_usd', value: String(row.balance_usd ?? '') });
+                          }}>
                           {editing?.instrumentId === row.id && editing.field === 'balance_usd' ? (
                             <input
                               autoFocus
@@ -397,7 +425,12 @@ export default function Positions() {
                           <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_12m)}`}>{fmtPct(row.return_12m)}</td>
                           <td className="px-3 py-2.5 text-center text-gray-500">{row.rank_1m ?? '—'}</td>
                         </>}
-                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group" onClick={() => row.mp_id && setEditing({ mpId: row.mp_id, instrumentId: row.id, field: 'quantity', value: String(row.quantity ?? '') })}>
+                        <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group"
+                          onClick={async () => {
+                            let mpId = row.mp_id;
+                            if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
+                            setEditing({ mpId, instrumentId: row.id, field: 'quantity', value: String(row.quantity ?? '') });
+                          }}>
                           {editing?.instrumentId === row.id && editing.field === 'quantity' ? (
                             <input
                               autoFocus

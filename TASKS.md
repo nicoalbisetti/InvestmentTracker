@@ -1,80 +1,63 @@
-# TASKS — Operaciones de Renta Variable
+# TASKS — Import Internacional XP
 
-Feature: Registro de compras/ventas de acciones/FIIs con recálculo automático de posiciones.
-
----
-
-## Backend
-
-### Modelo y Schema
-- [ ] Crear `backend/app/models/equity_trade.py` (tabla equity_trades)
-- [ ] Crear `backend/app/schemas/equity_trade.py` (EquityTradeCreate, EquityTradeUpdate, EquityTradeOut)
-- [ ] Registrar EquityTrade en `backend/app/database.py` → `create_tables()`
-- [ ] Crear `backend/migrations/add_equity_trades.py` (script idempotente)
-
-### Servicio de Recálculo
-- [ ] Crear `backend/app/services/equity_recalculate.py` con `recalculate_equity_positions()`
-  - [ ] Normalizar from_date al primer día del mes
-  - [ ] Obtener MonthlyPositions >= from_month ordenadas ASC
-  - [ ] Para cada mes: calcular quantity acumulada (compras - ventas hasta fin de mes)
-  - [ ] Actualizar quantity en MonthlyPosition
-  - [ ] Si unit_price != null → actualizar balance_brl = quantity × unit_price
-  - [ ] Calcular avg_price ponderado (solo compras) y actualizar mp.avg_price
-  - [ ] Loguear warning si quantity resulta negativa (no lanzar excepción)
-
-### Router y Endpoints
-- [ ] Crear `backend/app/routers/equity_trades.py`
-  - [ ] GET `/api/equity-trades/` — lista paginada con filtros
-  - [ ] POST `/api/equity-trades/` — crear + recalcular
-  - [ ] GET `/api/equity-trades/{id}` — detalle
-  - [ ] PUT `/api/equity-trades/{id}` — editar + recalcular desde min(fecha_ant, fecha_nueva)
-  - [ ] DELETE `/api/equity-trades/{id}` — eliminar + recalcular (204)
-  - [ ] GET `/api/equity-trades/summary/{instrument_id}` — resumen P&L
-- [ ] Registrar router en `backend/app/main.py` bajo `/api/equity-trades`
+Feature: Importador de posiciones y dividendos desde extracto PDF de XP International.
+Wizard de 3 pasos: upload PDF → preview diff → confirmar.
 
 ---
+
+## Setup
+- [ ] Agregar `pdfplumber` a `backend/requirements.txt`
+- [ ] Actualizar lista de custodios normalizados en `CONTEXT.md` (agregar XP_INTERNATIONAL)
+
+## Fix update-equities-prices (prerequisito crítico)
+- [ ] Leer código actual de `update-equities-prices` en `backend/app/routers/positions.py`
+- [ ] Separar instrumentos en lote BRL (ticker + ".SA") y lote USD (sin sufijo)
+- [ ] Para instrumentos USD: actualizar `balance_usd` y calcular `balance_brl = balance_usd * mp.usd_rate`
+- [ ] Descargar ambos lotes en llamadas separadas a `yf.download()`
+
+## Backend — Parser
+- [ ] Crear `backend/app/services/international_importer.py`
+- [ ] Implementar `parse_xp_international_pdf()` con pdfplumber
+- [ ] Implementar `_merge_symbol_cusip_rows()` para manejar CUSIP en fila separada
+- [ ] Implementar `parse_atividade()` filtrando solo CASH_DIVIDEND
+- [ ] Implementar `parse_period_dates()` extrayendo fechas del header
+- [ ] Implementar `get_usd_brl_rate()` con yfinance (BRL=X)
+
+## Backend — Clasificación y Matching
+- [ ] Implementar `classify_international()` (UST / CORP_BOND / ETF)
+- [ ] Implementar `match_instrument()` (CUSIP → ticker → instrument_code_mappings)
+
+## Backend — Diff y Apply
+- [ ] Implementar `compute_position_diffs()` comparando con MonthlyPosition existente
+- [ ] Implementar `check_dividend_duplicates()` contra provento_items
+- [ ] Implementar `apply_import_positions()` con upsert MonthlyPosition
+- [ ] Implementar `apply_import_dividends()` creando ProvéntoItem
+
+## Backend — Router
+- [ ] Crear `backend/app/routers/import_international.py`
+- [ ] Endpoint `POST /api/import/international/preview`
+- [ ] Endpoint `POST /api/import/international/confirm`
+- [ ] Endpoint `POST /api/import/international/map-instrument`
+- [ ] Registrar router en `backend/app/main.py`
 
 ## Frontend
+- [ ] Crear `frontend/src/api/importInternational.ts`
+- [ ] Crear `frontend/src/pages/ImportInternational.tsx` (wizard 3 pasos)
+  - [ ] Paso 1: upload PDF + tipo de cambio + opciones
+  - [ ] Paso 2: tabs posiciones/dividendos con checkboxes y resumen
+  - [ ] Paso 3: resultado con métricas de importación
+- [ ] Agregar ruta `/import/international` en `frontend/src/App.tsx`
+- [ ] Agregar botón "Importar Internacional" en `frontend/src/pages/Positions.tsx`
+- [ ] Agregar entrada en sidebar bajo "Importar" en `frontend/src/components/layout/Sidebar.tsx`
 
-### API client
-- [ ] Crear `frontend/src/api/equityTrades.ts`
-  - [ ] `getEquityTrades(params)`
-  - [ ] `createEquityTrade(data)`
-  - [ ] `updateEquityTrade(id, data)`
-  - [ ] `deleteEquityTrade(id)`
-  - [ ] `getEquityTradeSummary(instrumentId)`
-
-### Componentes
-- [ ] Crear `frontend/src/components/EquityTradeForm.tsx` (formulario reutilizable: crear + editar)
-  - [ ] Autocomplete de instrumento (ticker + nombre)
-  - [ ] Toggle Compra/Venta
-  - [ ] Date picker (default hoy)
-  - [ ] Inputs numéricos (cantidad, precio)
-  - [ ] Campo calculado Monto Total (read-only, cantidad × precio, en tiempo real)
-  - [ ] Textarea notas (opcional)
-- [ ] Crear `frontend/src/components/EquityTradeSummaryCard.tsx`
-  - [ ] Mostrar qty actual, avg_price, último precio, P&L en BRL y %
-  - [ ] Color verde/rojo según P&L
-  - [ ] Badge rojo si qty_actual negativa
-
-### Página principal
-- [ ] Crear `frontend/src/pages/EquityTrades.tsx`
-  - [ ] Sección superior: formulario nueva operación con toast de éxito
-  - [ ] Sección inferior: tabla historial con filtros (instrumento, fechas, tipo)
-  - [ ] Modal de edición (Dialog) con EquityTradeForm pre-cargado
-  - [ ] AlertDialog de confirmación de eliminación con fecha afectada
-  - [ ] Card de resumen al seleccionar instrumento en filtro
-  - [ ] Paginación (50 por página)
-
-### Integración
-- [ ] Agregar ruta `/equity-trades` en `frontend/src/App.tsx`
-- [ ] Agregar item "Operaciones" con icono `TrendingUp` en `frontend/src/components/layout/Sidebar.tsx`
-- [ ] Agregar link "Ver operaciones" en `frontend/src/pages/Positions.tsx` (menú de fila para accion/fii)
-
----
+## Verificación
+- [ ] Test E2E: subir PDF de Marzo 2026, confirmar, verificar 8 posiciones en BD
+- [ ] Test duplicados: segunda importación del mismo PDF → 0 nuevas posiciones, 0 nuevos dividendos
+- [ ] Verificar balance_brl calculado correctamente con rate ingresado
+- [ ] Verificar que update-equities-prices actualiza VOO/RDVY sin romper PETR4/VALE3
 
 ## Documentación final
-- [ ] Actualizar `CONTEXT.md` (tabla equity_trades, endpoints, página)
+- [ ] Actualizar `CONTEXT.md` (endpoints, custodio XP_INTERNATIONAL, página ImportInternational)
 - [ ] Actualizar `PLAN.md` (marcar feature como completada)
-- [ ] Commit del código
-- [ ] Commit de documentación
+- [ ] Mover spec de `specs/pending/` a `specs/done/`
+- [ ] Commit código + documentación

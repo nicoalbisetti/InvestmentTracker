@@ -46,17 +46,19 @@ def get_summary(instrument_id: int, db: Session = Depends(get_db)):
 
     total_compras_qty = sum(t.quantity for t in trades if t.trade_type == "compra")
     total_ventas_qty = sum(t.quantity for t in trades if t.trade_type == "venta")
-    qty_actual = total_compras_qty - total_ventas_qty
 
-    compras = [t for t in trades if t.trade_type == "compra"]
-    if compras:
-        total_cost = sum(t.quantity * t.price for t in compras)
-        avg_price_compra = total_cost / total_compras_qty if total_compras_qty > 0 else None
-    else:
-        avg_price_compra = None
-
-    # Último precio: unit_price del mp más reciente
+    # Usar el mp más reciente para obtener cantidad actual y avg_price (respetando arrastre histórico)
     last_mp = (
+        db.query(MonthlyPosition)
+        .filter(MonthlyPosition.instrument_id == instrument_id)
+        .order_by(MonthlyPosition.date.desc())
+        .first()
+    )
+    qty_actual = last_mp.quantity if last_mp and last_mp.quantity is not None else 0.0
+    avg_price_compra = last_mp.avg_price if last_mp else None
+
+    # Último precio: unit_price del mp más reciente que tenga precio
+    last_priced_mp = (
         db.query(MonthlyPosition)
         .filter(
             MonthlyPosition.instrument_id == instrument_id,
@@ -65,7 +67,7 @@ def get_summary(instrument_id: int, db: Session = Depends(get_db)):
         .order_by(MonthlyPosition.date.desc())
         .first()
     )
-    ultimo_precio = last_mp.unit_price if last_mp else None
+    ultimo_precio = last_priced_mp.unit_price if last_priced_mp else None
 
     pl_no_realizado = None
     pl_no_realizado_pct = None

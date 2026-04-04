@@ -227,6 +227,7 @@ GET  /api/import/history              # Historial de importaciones
 
 ### Fase 7 — Features adicionales
 - [x] Operaciones de Renta Variable — registro de compras/ventas, recálculo de posiciones, historial con P&L
+- [x] Importador XP International — wizard PDF (posiciones + dividendos), clasificación UST/CORP_BOND/ETF, matching CUSIP/ticker, fix update-equities-prices USD vs BRL
 
 ### Fase 4 — Frontend resto de paginas
 14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)

@@ -30,6 +30,10 @@ c) Crear en esa lista una tarea por cada item del TASKS.md usando
 d) Recién después de completar a), b) y c), iniciar el desarrollo.
    Marcar cada tarea como completada en ClickUp a medida que avanza.
 
+e) Si el spec fue provisto como texto en el chat y no existe aún como archivo,
+   crearlo en `specs/pending/<nombre_feature>.txt` antes de escribir código.
+   Convención de nombres: `prompt_<feature_en_snake_case>.txt`
+   Si ya existe en `specs/pending/`, no hacer nada.
 ---
 
 ## PASO FINAL — Actualización de documentación obligatoria
@@ -46,3 +50,9 @@ Al terminar cualquier feature o conjunto de cambios, siempre actualizar:
    - Marcar como completada la tarea correspondiente si figura en las Fases de Desarrollo
 
 3. Hacer commit de los cambios de documentación junto con (o inmediatamente después de) el commit del código.
+
+4. Ciclo de vida del spec:
+   - Mover el archivo de spec de `specs/pending/` a `specs/done/`:
+       mv specs/pending/prompt_<nombre>.txt specs/done/prompt_<nombre>.txt
+   - Hacer esto solo cuando todos los criterios de aceptación del spec estén cumplidos.
+   - Si el feature quedó incompleto en la sesión, dejar el spec en `specs/pending/`.

@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 2 Abr 2026.
+> Refleja el estado REAL del código al 2 Abr 2026 (actualizado: Import Internacional XP).
 
 ---
 
@@ -15,6 +15,7 @@
 - pandas >= 2.0.0
 - openpyxl >= 3.1.0
 - yfinance >= 0.2.0
+- pdfplumber >= 0.11.0
 - Pydantic >= 2.0.0
 - python-dateutil >= 2.8.0
 - requests >= 2.28.0
@@ -93,11 +94,15 @@ InvestmentTracker/
 │   │   │   ├── quotes.py
 │   │   │   ├── import_excel.py
 │   │   │   ├── import_fixed_income.py
-│   │   │   └── import_proventos.py
+│   │   │   ├── import_proventos.py
+│   │   │   ├── import_international.py
+│   │   │   └── equity_trades.py
 │   │   ├── services/
 │   │   │   ├── importer.py
 │   │   │   ├── fixed_income_importer.py
 │   │   │   ├── proventos_importer.py
+│   │   │   ├── international_importer.py
+│   │   │   ├── equity_recalculate.py
 │   │   │   └── performance.py
 │   │   └── schemas/
 │   │       ├── common.py
@@ -123,7 +128,9 @@ InvestmentTracker/
 │   │   │   ├── Transactions.tsx
 │   │   │   ├── Settings.tsx
 │   │   │   ├── ImportFixedIncome.tsx
-│   │   │   └── ImportProventos.tsx
+│   │   │   ├── ImportProventos.tsx
+│   │   │   ├── ImportInternational.tsx
+│   │   │   └── EquityTrades.tsx
 │   │   ├── components/
 │   │   │   ├── layout/
 │   │   │   │   └── Sidebar.tsx         # Incluye toggle Demo/Real
@@ -145,7 +152,9 @@ InvestmentTracker/
 │   │   │   ├── instruments.ts
 │   │   │   ├── import.ts
 │   │   │   ├── importFixedIncome.ts
-│   │   │   └── importProventos.ts
+│   │   │   ├── importProventos.ts
+│   │   │   ├── importInternational.ts
+│   │   │   └── equityTrades.ts
 │   │   └── utils/
 │   │       └── formatters.ts
 │   └── package.json
@@ -401,6 +410,7 @@ InvestmentTracker/
 | GET | `/count-without-price` | Count de renta_fija activos sin balance |
 | POST | `/update-equities-prices?month=YYYY-MM` | Actualiza precios B3 via yfinance |
 | POST | `/update-usd-rate?month=YYYY-MM` | Actualiza cotización USD/BRL |
+| POST | `/copy-previous-month` | Copia balances/quantities de los instrumentos activos al mes actual |
 | POST | `/recalculate-stats` | Recalcula current_balance_brl, portfolio_pct, rankings |
 | POST | `/ensure-month` | Crea MonthlyPosition vacía para instrument_id+month si no existe; retorna mp_id |
 
@@ -470,6 +480,13 @@ InvestmentTracker/
 | POST | `/confirm` | Aplica import |
 | POST | `/map-instrument` | Mapeo manual de instrumento |
 
+### `/api/import/international`
+| Método | Ruta | Descripción |
+|---|---|---|
+| POST | `/preview` | Parsea PDF XP International, clasifica, matchea, devuelve diff posiciones + dividendos (token 30 min TTL) |
+| POST | `/confirm` | Aplica import usando token: upsert MonthlyPosition + crea ProvéntoItem |
+| POST | `/map-instrument` | Persiste mapeo clave (CUSIP/ticker) → instrument_id |
+
 ### `/api/equity-trades`
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -506,8 +523,8 @@ distribución por tipo/custodio, top/bottom 5, vencimientos.
 
 ### Positions (`/positions`)
 Tabla de posiciones filtrable/paginable/sortable. Sort default: brasil→exterior→tipo→nombre.
-Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL.
-**API:** `/api/positions`, `/api/positions/export`, `/api/positions/update-equities-prices`, etc.
+Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL, copiar mes ant.
+**API:** `/api/positions`, `/api/positions/export`, `/api/positions/copy-previous-month`, etc.
 
 ### History (`/history`)
 Matriz Histórico: tabla instrumento × período (vista Mensual o Anual). Toggle BRL/USD, selector de año,
@@ -548,6 +565,16 @@ Soporta cross-custodio, mapeo manual de instrumentos.
 Wizard similar para importar proventos pagados desde Excel de XP/Santander.
 **API:** `/api/import/proventos/*`
 
+### ImportInternational (`/import/international`)
+Wizard 3 pasos para importar posiciones y dividendos desde extracto PDF de XP International.
+Paso 1: upload PDF + tipo de cambio USD/BRL (sugerido por yfinance) + opciones.
+Paso 2: preview con tabs Posiciones/Dividendos, checkboxes para excluir items, badges de match/status/duplicado.
+Paso 3: resultado con métricas de importación.
+Clasifica instrumentos como UST / CORP_BOND / ETF (type=renta_fija o accion). Match por CUSIP o ticker.
+Dividendos: solo CASH_DIVIDEND, valor neto (post-withholding), crea ProvéntoItem con source="XP_INTERNATIONAL_PDF".
+**API:** `/api/import/international/*`
+**Link desde Positions:** botón "Importar Internacional".
+
 ### EquityTrades (`/equity-trades`)
 Registro de compras y ventas de acciones/FIIs/ETFs. Sección superior: formulario nueva operación
 (autocomplete instrumento, toggle compra/venta, date picker, cantidad, precio, monto calculado, notas).
@@ -561,6 +588,11 @@ precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalcula
 ---
 
 ## 7. Servicios y Lógica de Negocio
+
+### `services/snapshot_sync.py`
+- `sync_snapshot_for_date(db, target_date)` — Sincroniza `PortfolioSnapshot` (total_brl, total_usd) de un mes en particular desde los saldos de `MonthlyPosition`.
+- `sync_all_snapshots(db)` — Sincroniza la tabla entera iterando por cada fecha existente.
+- Se debe llamar cada vez que se alteran balances históricos o se copian meses (ej. transacciones, precios, equities).
 
 ### `services/performance.py`
 - `calculate_cagr(initial, final, years)` — retorno anualizado
@@ -577,6 +609,18 @@ precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalcula
 - `_extract_asset_class(produto)` → CDB | CRI | CRA | DEB | LCA | LCI | LIG | TD | FUNDO_CREDITO
 - `_clean_nome(produto)` → (nombre_limpio, in_liquidation: bool)
 - `auto_match_score(parsed, inst)` → 0-100 basado en keywords + vencimiento
+
+### `services/international_importer.py`
+- `parse_xp_international_pdf(pdf_bytes)` — parsea extracto PDF de XP International; retorna `ParsedReport`
+- `_parse_carteira_table()` — extrae posiciones de la tabla CARTEIRA (pdfplumber)
+- `_merge_symbol_cusip_rows()` — maneja CUSIP en fila separada o misma celda con `\n`
+- `parse_atividade()` — extrae dividendos CASH_DIVIDEND de la tabla ATIVIDADE
+- `classify_international(pos)` — detecta UST / CORP_BOND / ETF por regex
+- `match_instrument(pos, classification, db)` — CUSIP → ticker → instrument_code_mappings
+- `get_usd_brl_rate(reference_date)` — consulta yfinance "BRL=X" para el tipo de cambio
+- `compute_position_diffs()` / `check_dividend_duplicates()` — genera diff vs BD
+- `apply_import_positions()` / `apply_import_dividends()` — aplica import a la BD
+- `store_preview()` / `load_preview()` — caché en memoria, TTL 30 min
 
 ### `services/proventos_importer.py`
 - `parse_excel(file_bytes)` — parsea "Proventos Recebidos" de Excel XP/Santander
@@ -633,7 +677,7 @@ db.commit()
 ```
 
 ### Custodios normalizados
-`"XP"` | `"SANTANDER"` | `"INTER"` | `"BRADESCO"` | `"ITAU"` | `"DESCONHECIDO"`
+`"XP"` | `"SANTANDER"` | `"INTER"` | `"BRADESCO"` | `"ITAU"` | `"XP_INTERNATIONAL"` | `"DESCONHECIDO"`
 
 ### Demo mode
 El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
@@ -659,10 +703,13 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Cotizaciones manuales
 - [x] Benchmarks CDI/IPCA con caché local (BCB API)
 - [x] Operaciones de Renta Variable: registro compras/ventas, recálculo automático de MonthlyPosition (quantity, balance_brl, avg_price), historial, card resumen P&L
+- [x] Importador XP International: wizard PDF 3 pasos, posiciones + dividendos, clasificación UST/CORP_BOND/ETF, matching por CUSIP/ticker, fix update-equities-prices para USD vs BRL
 - [x] Modo Demo (X-Env header → demo_engine)
 - [x] Toggle Demo/Real en UI (sidebar)
 - [x] Dark/Light theme
 - [x] Migración automática de schema en startup (`_migrate_provento_items`)
+- [x] Copiar posiciones del mes anterior al actual de forma segura para instrumentos activos
+- [x] Sincronización automática de pre-cálculos del PortfolioSnapshot al editar históricos (snapshot_sync)
 
 ---
 
@@ -752,3 +799,6 @@ Es el default del frontend. Si el usuario hace click en columna, cambia a ese so
 `allow_origins=["*"]` + `allow_credentials=False`. No usar `allow_credentials=True` con wildcard origins
 (incompatible en CORS spec). El global exception handler agrega `Access-Control-Allow-Origin: *` en
 respuestas 500 para evitar que el browser bloquee errores del servidor.
+
+### Sincronización de PortfolioSnapshot
+El Dashboard lee directamente de `PortfolioSnapshot` por rendimiento. Si editas balances históricos (`update_position_balance`), creas operaciones (`equity_trades` o `transactions`), o copias posiciones (`copy-previous-month`), **siempre** invocar `sync_snapshot_for_date(db, affected_date)` para garantizar que el total fotográfico (KPIs) coincida con la sumatoria estricta de `MonthlyPosition`.

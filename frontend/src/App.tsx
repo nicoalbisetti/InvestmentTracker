@@ -11,6 +11,7 @@ import Transactions from './pages/Transactions';
 import Settings from './pages/Settings';
 import ImportFixedIncome from './pages/ImportFixedIncome';
 import ImportProventos from './pages/ImportProventos';
+import ImportInternational from './pages/ImportInternational';
 import EquityTrades from './pages/EquityTrades';
 
 export default function App() {
@@ -29,6 +30,7 @@ export default function App() {
             <Route path="settings" element={<Settings />} />
             <Route path="import/fixed-income" element={<ImportFixedIncome />} />
             <Route path="import/proventos" element={<ImportProventos />} />
+            <Route path="import/international" element={<ImportInternational />} />
             <Route path="equity-trades" element={<EquityTrades />} />
           </Route>
         </Routes>

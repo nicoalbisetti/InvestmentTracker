@@ -7,6 +7,7 @@ from sqlalchemy import func
 
 from app.models.equity_trade import EquityTrade
 from app.models.monthly_position import MonthlyPosition
+from app.services.snapshot_sync import sync_snapshot_for_date
 
 logger = logging.getLogger(__name__)
 
@@ -37,55 +38,62 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
         )
         return 0
 
-    # Obtener todos los trades del instrumento (necesitamos acumular desde el inicio)
-    all_trades = (
-        db.query(EquityTrade)
-        .filter(EquityTrade.instrument_id == instrument_id)
-        .all()
+    # 3. Encontrar la posición del mes inmediatamente anterior al from_month
+    prev_pos = (
+        db.query(MonthlyPosition)
+        .filter(
+            MonthlyPosition.instrument_id == instrument_id,
+            MonthlyPosition.date < from_month,
+        )
+        .order_by(MonthlyPosition.date.desc())
+        .first()
     )
+
+    running_qty = prev_pos.quantity if prev_pos and prev_pos.quantity is not None else 0.0
+    running_avg = prev_pos.avg_price if prev_pos and prev_pos.avg_price is not None else 0.0
 
     recalculated = 0
     for mp in positions:
-        # Último día del mes de mp.date
+        # Obtener los trades de este mes
         last_day = monthrange(mp.date.year, mp.date.month)[1]
         end_of_month = mp.date.replace(day=last_day)
+        start_of_month = mp.date.replace(day=1)
 
-        # a. Calcular quantity acumulada hasta fin de mes
-        qty_compras = sum(
-            t.quantity for t in all_trades
-            if t.trade_type == "compra" and t.date <= end_of_month
-        )
-        qty_ventas = sum(
-            t.quantity for t in all_trades
-            if t.trade_type == "venta" and t.date <= end_of_month
-        )
-        qty_acumulada = qty_compras - qty_ventas
-
-        if qty_acumulada < 0:
-            logger.warning(
-                "equity_recalculate: quantity negativa (%.2f) para instrument_id=%s en %s",
-                qty_acumulada, instrument_id, mp.date,
+        trades_of_month = (
+            db.query(EquityTrade)
+            .filter(
+                EquityTrade.instrument_id == instrument_id,
+                EquityTrade.date >= start_of_month,
+                EquityTrade.date <= end_of_month,
             )
+            .order_by(EquityTrade.date.asc(), EquityTrade.id.asc())
+            .all()
+        )
 
-        # b. Actualizar quantity
-        mp.quantity = qty_acumulada
+        # Aplicar trades iterativamente al running
+        for t in trades_of_month:
+            if t.trade_type == "compra":
+                total_cost_before = running_qty * running_avg
+                trade_cost = t.quantity * t.price
+                running_qty += t.quantity
+                if running_qty > 0:
+                    running_avg = (total_cost_before + trade_cost) / running_qty
+            elif t.trade_type == "venta":
+                running_qty -= t.quantity
+                if running_qty < 0:
+                    logger.warning("equity_recalculate: quantity negativa tras venta para instrument_id=%s", instrument_id)
+                    running_qty = 0.0
 
-        # c. Si hay unit_price, recalcular balance_brl
+        # Actualizar MP
+        mp.quantity = running_qty
+        mp.avg_price = running_avg if running_qty > 0 and running_avg > 0 else None
+
+        # Si hay unit_price, recalcular balance_brl
         if mp.unit_price is not None:
-            mp.balance_brl = qty_acumulada * mp.unit_price
+            mp.balance_brl = round(running_qty * mp.unit_price, 2)
 
-        # d. Calcular avg_price ponderado (solo compras)
-        compras_hasta_mes = [
-            t for t in all_trades
-            if t.trade_type == "compra" and t.date <= end_of_month
-        ]
-        if compras_hasta_mes:
-            total_qty_compras = sum(t.quantity for t in compras_hasta_mes)
-            total_cost = sum(t.quantity * t.price for t in compras_hasta_mes)
-            mp.avg_price = total_cost / total_qty_compras if total_qty_compras > 0 else None
-        else:
-            mp.avg_price = None
-
+        db.flush()
+        sync_snapshot_for_date(db, mp.date)
         recalculated += 1
 
     db.flush()

@@ -1,0 +1,291 @@
+=============================================================================
+SPEC: IMPORTADOR DE POSICIONES INTERNACIONALES — XP International
+Versión: 1.1 (decisiones de diseño incorporadas)
+Fecha: 2026-04-02
+=============================================================================
+
+DECISIONES DE DISEÑO CONFIRMADAS
+----------------------------------
+1. ETFs clasificados como type="accion" en esta versión.
+2. Proventos: registrar solo valor NETO (post-withholding). Sin campos de bruto/withholding.
+3. Un solo wizard que importa posiciones Y dividendos desde el mismo PDF.
+4. Matching de instrumentos: usar campo ticker/codigo existente.
+   - Bonds (CORP_BOND, UST): el usuario ya habrá seteado codigo = CUSIP manualmente.
+   - ETFs/acciones: el usuario ya habrá seteado codigo = ticker (RDVY, VOO, SPGP).
+5. Custodio: "XP_INTERNATIONAL" — agregar a la lista normalizada.
+6. El wizard se lanza desde la página Posiciones.
+
+ADVERTENCIA SOBRE update-equities-prices:
+  El endpoint POST /api/positions/update-equities-prices actualiza precios
+  de instrumentos tipo "accion" y "fii" usando instrument.ticker (o el campo
+  "codigo" que hace las veces de ticker) vía yfinance.
+  RIESGO: Si la query no filtra por custodio ni por currency, intentará
+  actualizar VOO, RDVY y SPGP junto con PETR4, VALE3, etc.
+  - Tickers B3 tienen sufijo ".SA" en yfinance (PETR4.SA, VALE3.SA).
+  - Tickers NYSE/NASDAQ NO tienen sufijo (VOO, RDVY, SPGP).
+  ESTO PUEDE FUNCIONAR SIN CAMBIOS si yfinance resuelve los tickers sin
+  sufijo correctamente. PERO hay que verificarlo.
+  Acción requerida en este feature: revisar el código de update-equities-prices
+  y agregar lógica para separar el download por moneda/sufijo, o simplemente
+  dejar que yfinance lo resuelva (muchos tickers sin ".SA" fallan en yfinance).
+  VER SECCIÓN 7 para el fix específico.
+
+=============================================================================
+1. PARSEO DEL PDF
+=============================================================================
+
+Librería: pdfplumber
+Instalación: pip install pdfplumber (agregar a requirements.txt)
+
+Función principal: parse_xp_international_pdf(pdf_bytes: bytes) -> ParsedReport
+
+El PDF tiene dos secciones a parsear:
+  A) Tabla "CARTEIRA" — página 2
+  B) Tabla "ATIVIDADE NÃO RELACIONADA À NEGOCIAÇÃO" — páginas 3-4
+
+--- 1.A Parseo de CARTEIRA ---
+
+Estrategia:
+  1. Iterar páginas del PDF con pdfplumber
+  2. En cada página, extraer tablas con page.extract_tables()
+  3. Identificar la tabla CARTEIRA buscando una fila de header que contenga
+     las palabras "Descrição" y "Quantidade" y "Preço"
+  4. Procesar filas de datos. Ignorar la fila "Total".
+
+ATENCIÓN — problema de símbolo+CUSIP:
+  pdfplumber puede extraer símbolo y CUSIP como una sola celda con newline:
+    "RDVY\n33738R506"
+  o como dos filas separadas (la fila de CUSIP tiene todas las otras celdas vacías).
+  Manejar AMBOS casos:
+    Caso A — misma celda con \n: split por \n → linea[0]=symbol, linea[1]=cusip
+    Caso B — fila siguiente solo tiene symbol en col1: mergearlo con la fila anterior
+
+Función _merge_symbol_cusip_rows(raw_rows) -> cleaned_rows:
+  Iterar raw_rows; si una fila tiene datos solo en col 1 (símbolo/CUSIP)
+  y las demás columnas son vacías → es la fila de CUSIP del instrumento anterior.
+  Mergear: prev_row.cusip = current_row[1]
+
+Columnas esperadas (pueden variar por versión del PDF — usar índices relativos):
+  0: Descrição
+  1: Símbolo / CUSIP (ver nota arriba)
+  2: Quantidade
+  3: Ativos alugados (ignorar)
+  4: Preço($)
+  5: Posição atual
+  6: Posição do período anterior
+  7: Alteração %
+  8: % Total da carteira
+
+ParsedPosition (Pydantic):
+  descricao: str              # "FORD MOTOR COMPANY 7.45%, 07/16/2031"
+  symbol: str | None          # "RDVY"
+  cusip: str | None           # "33738R506"
+  quantidade: float           # face value (bonds) o shares (ETFs/equities)
+  preco_usd: float            # precio unitario en USD
+  posicao_usd: float          # valor de mercado = posição atual del PDF
+  posicao_anterior_usd: float # posição do período anterior
+  pct_carteira: float         # % del total
+  asset_class: str            # inferido (ver sección 2)
+
+Nota sobre precios de bonds:
+  Para bonds: preco_usd es % del par (ej: 107.9701 significa 107.9701% del valor nominal).
+  El valor de mercado = (quantidade_face_value * preco_usd / 100).
+  VERIFICACIÓN: posicao_usd del PDF debe coincidir con ese cálculo ±0.01.
+  Para ETFs/acciones: posicao_usd = quantidade * preco_usd directamente.
+  El parser debe SIEMPRE usar la columna "Posição atual" como fuente de verdad
+  del valor de mercado, no calcularlo, para evitar errores de redondeo.
+
+--- 1.B Parseo de ATIVIDADE ---
+
+Función: parse_atividade(pdf_bytes: bytes) -> List[ParsedDividend]
+
+  1. Buscar tablas con header que contenga "Tipo de transação" y "Valor líquido"
+  2. Filtrar SOLO filas donde tipo_transacao == "CASH_DIVIDEND"
+  3. Ignorar "TRANSFER" (son migraciones internas, valor líquido = 0)
+  4. Ignorar fila de "Total" si aparece
+
+De la columna "Descrição" extraer con regex:
+  Pattern: r"Cash Div of ([\d\.]+) on ([\d\.]+) shs\."
+    → dividend_per_share: float, shares: float
+  Pattern: r"Rec (\d{2}/\d{2}/\d{2})"
+    → rec_date: date (formato MM/DD/YY → date)
+  Pattern: r"Pay (\d{2}/\d{2}/\d{2})"
+    → pay_date: date
+  Pattern: r"(\d+)% NON Resident Alien Withholding"
+    → withholding_rate: float (ej: 30 → 0.30)
+
+ParsedDividend (Pydantic):
+  pay_date: date
+  rec_date: date
+  symbol: str | None
+  cusip: str | None
+  shares: float
+  dividend_per_share: float
+  valor_liquido_usd: float    # columna "Valor líquido($)" del PDF — ya neto de withholding
+  withholding_rate: float     # 0.30 en todos los casos del extrato de referencia
+
+ParsedReport (Pydantic):
+  period_start: date          # fecha inicio del extrato (2026-03-01)
+  period_end: date            # fecha fin del extrato (2026-03-31)
+  account_number: str         # "3XP83472" — parsear del header
+  positions: List[ParsedPosition]
+  dividends: List[ParsedDividend]
+  total_portfolio_usd: float  # "Total" de la tabla CARTEIRA
+  available_cash_usd: float   # "Saldo disponível" del RESUMO DA CONTA
+
+Función parse_period_dates(pdf_bytes) -> (date, date):
+  Buscar en la primera página el patrón "Data do extrato: YYYY-MM-DD - YYYY-MM-DD"
+  Retornar (period_start, period_end)
+
+=============================================================================
+2. CLASIFICACIÓN DE INSTRUMENTOS
+=============================================================================
+
+Función: classify_international(parsed: ParsedPosition) -> InstrumentClassification
+
+Reglas (en orden de precedencia):
+
+  BOND_PATTERN = r"\d+\.?\d*%,\s+\d{2}/\d{2}/\d{4}"  # "7.45%, 07/16/2031"
+
+  Si "UNITED STATES TREASURY" in descricao.upper():
+    asset_class = "UST"
+    type = "renta_fija"
+    currency = "USD"
+
+  Elif re.search(BOND_PATTERN, descricao):
+    asset_class = "CORP_BOND"
+    type = "renta_fija"
+    currency = "USD"
+    # Parsear coupon y maturity del nombre:
+    coupon_rate = float(match.group(1))       # 7.45
+    maturity_date = parse_us_date(match.group(2))  # 07/16/2031 → date(2031,7,16)
+    issuer = descricao[:match.start()].strip()     # "FORD MOTOR COMPANY"
+
+  Else:
+    # ETF o equity — tratar como accion (decisión v1)
+    asset_class = "ETF"     # guardado en asset_class solo para referencia interna
+    type = "accion"
+    currency = "USD"
+    ticker = parsed.symbol  # RDVY, VOO, SPGP
+
+InstrumentClassification:
+  asset_class: Literal["UST", "CORP_BOND", "ETF"]
+  type: str                  # "renta_fija" o "accion"
+  currency: str              # siempre "USD"
+  location: str              # siempre "exterior"
+  custodian: str             # siempre "XP_INTERNATIONAL"
+  issuer: str                # para bonds: extraído del nombre; para ETFs: descripción completa
+  coupon_rate: float | None  # solo bonds
+  maturity_date: date | None # solo bonds
+  ticker_for_prices: str | None  # para ETFs: symbol (VOO, RDVY, SPGP); para bonds: None
+
+=============================================================================
+3. MATCHING DE INSTRUMENTOS (usando campo ticker/codigo existente)
+=============================================================================
+
+Función: match_instrument(parsed: ParsedPosition, classification, db) -> MatchResult
+
+El usuario configurará los instrumentos manualmente en la BD ANTES de importar:
+  - Para bonds: instrument.ticker = CUSIP (ej: "345370CA6")
+  - Para ETFs: instrument.ticker = ticker (ej: "RDVY", "VOO", "SPGP")
+  En ambos casos custodian = "XP_INTERNATIONAL" y currency = "USD"
+
+Estrategia de matching (en orden de precedencia):
+
+  Paso 1 — Match por CUSIP (bonds):
+    Si parsed.cusip:
+      buscar Instrument donde ticker = parsed.cusip AND custodian = "XP_INTERNATIONAL"
+      Si match exacto → status="EXACT", score=100
+
+  Paso 2 — Match por symbol/ticker (ETFs):
+    Si parsed.symbol Y no encontrado en paso 1:
+      buscar Instrument donde ticker = parsed.symbol AND custodian = "XP_INTERNATIONAL"
+      Si match exacto → status="EXACT", score=100
+
+  Paso 3 — Match por symbol en instrument_code_mappings:
+    (por si el usuario usó el wizard de mapeo manual en una sesión previa)
+    buscar InstrumentCodeMapping donde codigo_excel = parsed.cusip OR codigo_excel = parsed.symbol
+    Si match → status="MAPPED", score=100
+
+  Paso 4 — Sin match:
+    status="NEW"
+    Si config.create_new_instruments=True → se creará automáticamente
+    Si config.create_new_instruments=False → el usuario debe asignar manualmente
+
+MatchResult:
+  status: Literal["EXACT", "MAPPED", "NEW"]
+  instrument_id: int | None
+  match_key: str   # qué campo fue usado para hacer el match
+
+=============================================================================
+4. TIPO DE CAMBIO USD/BRL
+=============================================================================
+
+En el Paso 1 del wizard el backend sugiere el rate automáticamente:
+
+  Función: get_usd_brl_rate(reference_date: date) -> float:
+    Intentar yfinance: yf.download("BRL=X", start=reference_date - timedelta(5),
+                                             end=reference_date + timedelta(1))["Close"]
+    Tomar el valor más cercano a reference_date (último día hábil disponible)
+    Si falla → retornar None (el usuario deberá ingresarlo manualmente)
+
+  reference_date = period_end (2026-03-31 para el extrato de referencia)
+
+El usuario puede editar el rate sugerido. El rate ingresado se usa para:
+  - Calcular balance_brl = posicao_usd * usd_brl_rate (posiciones)
+  - Calcular amount_brl = valor_liquido_usd * usd_brl_rate (dividendos)
+
+=============================================================================
+5. MODELOS DE DATOS — SIN CAMBIOS DE SCHEMA
+=============================================================================
+
+NO se requieren ALTER TABLE. Se usan campos existentes.
+
+=============================================================================
+6. MODELOS PYDANTIC
+=============================================================================
+
+InternationalImportConfig, InternationalDiffItem, DividendDiffItem — ver spec completo.
+
+=============================================================================
+7. FIX EN update-equities-prices (CAMBIO REQUERIDO)
+=============================================================================
+
+Para instrumentos USD (location="exterior" o currency="USD"):
+  - yf_ticker = instrument.ticker (sin sufijo .SA)
+  - Actualizar balance_usd = quantity * precio_usd
+  - Actualizar balance_brl = balance_usd * usd_rate (último conocido en mp.usd_rate)
+  - unit_price en USD
+
+Para instrumentos BRL:
+  - yf_ticker = instrument.ticker + ".SA"
+  - Actualizar balance_brl = quantity * precio_brl
+  - unit_price en BRL
+
+Separar en dos lotes de descarga yfinance (BRL y USD).
+
+=============================================================================
+8. ENDPOINTS BACKEND
+=============================================================================
+
+Prefijo: /api/import/international
+  POST /preview  — parsear PDF, clasificar, matchear, retornar diff
+  POST /confirm  — aplicar posiciones y dividendos a la BD
+  POST /map-instrument — guardar mapeo manual clave→instrument_id
+
+=============================================================================
+9. FRONTEND — WIZARD ÚNICO (3 PASOS)
+=============================================================================
+
+Componente: src/pages/ImportInternational.tsx
+Ruta: /import/international
+Paso 1: Upload PDF + config (tipo de cambio, opciones)
+Paso 2: Preview tabs posiciones/dividendos con checkboxes
+Paso 3: Resultado con resumen de importación
+
+=============================================================================
+10. DATOS DE REFERENCIA — MARZO 2026
+=============================================================================
+
+POSICIONES: 8 items, Total $49,005.20
+DIVIDENDOS: 3 items CASH_DIVIDEND, Total neto $44.42

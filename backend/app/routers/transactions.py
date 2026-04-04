@@ -9,6 +9,7 @@ from app.models.transaction import Transaction
 from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransactionOut
+from app.services.snapshot_sync import sync_snapshot_for_date
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -97,6 +98,9 @@ def _recompute_positions(db: Session, instrument_id: int, from_date: date):
         running_usd = running_usd + net_usd
         pos.balance_brl = max(running_brl, 0.0)
         pos.balance_usd = max(running_usd, 0.0) if running_usd else pos.balance_usd
+        
+        db.flush()
+        sync_snapshot_for_date(db, m)
 
     db.commit()
 

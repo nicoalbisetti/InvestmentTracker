@@ -11,6 +11,7 @@ from app.database import get_db
 from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from app.models.portfolio_snapshot import PortfolioSnapshot
+from app.services.snapshot_sync import sync_snapshot_for_date, sync_all_snapshots
 
 TYPE_ORDER = ["accion", "fii", "renta_fija", "fundo", "previdencia", "prestamos", "saving", "fgts", "outro"]
 
@@ -311,7 +312,9 @@ def update_equities_prices(
         rows = deduped
 
     errors = []
-    ticker_map: dict = {}  # yahoo_symbol -> (inst, mp)
+    # Separate into two buckets: BRL instruments (B3, ticker + ".SA") and USD (exterior, no suffix)
+    brl_ticker_map: dict = {}  # yahoo_symbol -> (inst, mp)
+    usd_ticker_map: dict = {}  # yahoo_symbol -> (inst, mp)
 
     for inst, mp in rows:
         if not inst.ticker or not inst.ticker.strip():
@@ -321,42 +324,41 @@ def update_equities_prices(
             errors.append(f"{inst.ticker}: sin cantidad")
             continue
         ticker_raw = inst.ticker.strip()
-        yahoo_symbol = ticker_raw if inst.location == "exterior" else f"{ticker_raw}.SA"
-        ticker_map[yahoo_symbol] = (inst, mp)
+        is_usd = inst.location == "exterior" or inst.currency == "USD"
+        if is_usd:
+            usd_ticker_map[ticker_raw] = (inst, mp)
+        else:
+            brl_ticker_map[f"{ticker_raw}.SA"] = (inst, mp)
 
-    if not ticker_map:
+    if not brl_ticker_map and not usd_ticker_map:
         return {"updated": 0, "skipped": len(errors), "errors": errors, "prices": []}
 
-    # Fetch current prices from Yahoo Finance in one batch
-    try:
-        yf_data = yf.download(
-            list(ticker_map.keys()),
-            period="1d",
-            progress=False,
-            auto_adjust=True,
-        )
-        # yf.download returns MultiIndex columns when multiple tickers
-        if hasattr(yf_data.columns, "levels"):
-            close_series = yf_data["Close"].iloc[-1]
-        else:
-            # Single ticker: columns are just OHLCV
-            single_sym = list(ticker_map.keys())[0]
-            close_series = {single_sym: float(yf_data["Close"].iloc[-1])}
-    except Exception as e:
-        return {"updated": 0, "skipped": len(ticker_map), "errors": errors + [str(e)], "prices": []}
+    def _fetch_close(symbols: list) -> dict:
+        """Download latest close prices from yfinance. Returns {symbol: price}."""
+        if not symbols:
+            return {}
+        try:
+            data = yf.download(symbols, period="1d", progress=False, auto_adjust=True)
+            if hasattr(data.columns, "levels"):
+                row = data["Close"].iloc[-1]
+                return {sym: float(row[sym]) for sym in symbols if sym in row}
+            else:
+                return {symbols[0]: float(data["Close"].iloc[-1])}
+        except Exception as e:
+            errors.append(f"yfinance error: {e}")
+            return {}
+
+    brl_prices = _fetch_close(list(brl_ticker_map.keys()))
+    usd_prices = _fetch_close(list(usd_ticker_map.keys()))
 
     updated = 0
     prices_out = []
 
-    for yahoo_symbol, (inst, mp) in ticker_map.items():
-        try:
-            current_price = float(close_series[yahoo_symbol])
-        except (KeyError, TypeError, ValueError):
+    # Process BRL instruments (B3)
+    for yahoo_symbol, (inst, mp) in brl_ticker_map.items():
+        current_price = brl_prices.get(yahoo_symbol)
+        if not current_price or current_price != current_price:
             errors.append(f"{inst.ticker}: sin precio en Yahoo Finance")
-            continue
-
-        if not current_price or current_price != current_price:  # NaN check
-            errors.append(f"{inst.ticker}: precio inválido en Yahoo Finance")
             continue
 
         old_balance = mp.balance_brl or 0
@@ -370,12 +372,45 @@ def update_equities_prices(
         prices_out.append({
             "ticker": inst.ticker,
             "name": inst.name,
+            "currency": "BRL",
             "quantity": mp.quantity,
             "ref_price": round(old_price, 2) if old_price else None,
             "current_price": round(current_price, 2),
             "change_pct": round(change_pct, 2) if change_pct is not None else None,
             "old_balance": round(old_balance, 2),
             "new_balance": round(new_balance, 2),
+        })
+
+    # Process USD instruments (exterior / XP_INTERNATIONAL)
+    for yahoo_symbol, (inst, mp) in usd_ticker_map.items():
+        current_price_usd = usd_prices.get(yahoo_symbol)
+        if not current_price_usd or current_price_usd != current_price_usd:
+            errors.append(f"{inst.ticker}: sin precio en Yahoo Finance")
+            continue
+
+        old_balance_usd = mp.balance_usd or 0
+        new_balance_usd = mp.quantity * current_price_usd
+        old_price = mp.unit_price
+        change_pct = ((current_price_usd / old_price) - 1) * 100 if old_price else None
+
+        mp.balance_usd = new_balance_usd
+        mp.unit_price = current_price_usd
+
+        # Recalculate BRL balance using last known usd_rate on this position
+        if mp.usd_rate and mp.usd_rate > 0:
+            mp.balance_brl = new_balance_usd * mp.usd_rate
+
+        updated += 1
+        prices_out.append({
+            "ticker": inst.ticker,
+            "name": inst.name,
+            "currency": "USD",
+            "quantity": mp.quantity,
+            "ref_price": round(old_price, 2) if old_price else None,
+            "current_price": round(current_price_usd, 2),
+            "change_pct": round(change_pct, 2) if change_pct is not None else None,
+            "old_balance": round(old_balance_usd, 2),
+            "new_balance": round(new_balance_usd, 2),
         })
 
     db.commit()
@@ -395,8 +430,72 @@ def ensure_month_position(payload: dict, db: Session = Depends(get_db)):
         db.add(mp)
         db.commit()
         db.refresh(mp)
+        sync_snapshot_for_date(db, target_date)
 
     return {"mp_id": mp.id}
+
+
+@router.post("/copy-previous-month")
+def copy_previous_month(payload: dict, db: Session = Depends(get_db)):
+    """
+    Copy positions from the previous month for active instruments that don't have
+    a position in the target month yet.
+    """
+    target_month = payload.get("target_month")
+    if not target_month:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="target_month is required")
+
+    target_date = date(int(target_month[:4]), int(target_month[5:7]), 1)
+    prev_date = target_date - relativedelta(months=1)
+
+    # Get active instruments
+    active_insts = db.query(Instrument.id).filter(Instrument.status == "activo").all()
+    active_inst_ids = [r[0] for r in active_insts]
+
+    if not active_inst_ids:
+        return {"copied": 0}
+
+    # Positions in previous month
+    prev_positions = db.query(MonthlyPosition).filter(
+        MonthlyPosition.date == prev_date,
+        MonthlyPosition.instrument_id.in_(active_inst_ids)
+    ).all()
+
+    # Positions already existing in target month
+    curr_positions = db.query(MonthlyPosition).filter(
+        MonthlyPosition.date == target_date,
+        MonthlyPosition.instrument_id.in_(active_inst_ids)
+    ).all()
+    
+    existing_keys = {(p.instrument_id, p.custodian_override) for p in curr_positions}
+
+    copied = 0
+    for p in prev_positions:
+        key = (p.instrument_id, p.custodian_override)
+        if key not in existing_keys:
+            # We copy only balance and quantity fields, strictly avoiding flow fields like applications or gain.
+            new_mp = MonthlyPosition(
+                instrument_id=p.instrument_id,
+                date=target_date,
+                balance_brl=p.balance_brl,
+                balance_usd=p.balance_usd,
+                usd_rate=p.usd_rate,
+                avg_price=p.avg_price,
+                quantity=p.quantity,
+                unit_price=p.unit_price,
+                custodian_override=p.custodian_override,
+                capital_invested=p.capital_invested
+            )
+            db.add(new_mp)
+            copied += 1
+
+    if copied > 0:
+        db.flush()
+        sync_snapshot_for_date(db, target_date)
+        db.commit()
+
+    return {"copied": copied, "target_month": target_month}
 
 
 @router.patch("/{mp_id}/balance")
@@ -431,6 +530,8 @@ def update_position_balance(
     elif "quantity" in payload and payload["quantity"] is not None:
         mp.quantity = float(payload["quantity"])
 
+    db.flush()
+    sync_snapshot_for_date(db, mp.date)
     db.commit()
     return {"mp_id": mp_id, "balance_brl": mp.balance_brl, "balance_usd": mp.balance_usd, "quantity": mp.quantity}
 
