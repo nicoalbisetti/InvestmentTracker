@@ -130,17 +130,9 @@ class DividendDiffItem(BaseModel):
 def _parse_float(s: Optional[str]) -> Optional[float]:
     if not s:
         return None
-    cleaned = s.replace(",", "").replace("%", "").strip()
+    cleaned = s.replace(".", "").replace(",", ".").replace("%", "").strip()
     try:
         return float(cleaned)
-    except (ValueError, TypeError):
-        return None
-
-
-def _parse_us_date(s: str) -> Optional[date]:
-    """Parse MM/DD/YYYY → date."""
-    try:
-        return datetime.strptime(s.strip(), "%m/%d/%Y").date()
     except (ValueError, TypeError):
         return None
 
@@ -153,53 +145,10 @@ def _parse_short_date(s: str) -> Optional[date]:
         return None
 
 
-def _merge_symbol_cusip_rows(raw_rows: list) -> list:
-    """
-    pdfplumber may return CUSIP as a separate row with only col[1] filled.
-    Merge such rows into the previous row.
-    """
-    merged = []
-    for row in raw_rows:
-        if not row:
-            continue
-        # Check if this is a CUSIP-only row: col[1] has content, rest are empty/None
-        non_empty = [i for i, c in enumerate(row) if c and str(c).strip()]
-        if non_empty == [1] and merged:
-            # This row contains only the CUSIP/symbol for the previous instrument
-            prev = merged[-1]
-            if prev.get("cusip") is None:
-                prev["cusip"] = str(row[1]).strip()
-        else:
-            merged.append({"_raw": row})
-    return merged
-
-
-def _extract_symbol_cusip(cell: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-    """Handle 'RDVY\n33738R506' or just 'RDVY' in a single cell."""
-    if not cell:
-        return None, None
-    parts = str(cell).strip().split("\n")
-    symbol = parts[0].strip() if parts[0].strip() else None
-    cusip = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
-    return symbol, cusip
-
-
-def _is_header_row(row: list) -> bool:
-    joined = " ".join(str(c) for c in row if c).lower()
-    return "descrição" in joined and ("quantidade" in joined or "preço" in joined)
-
-
-def _is_total_row(row: list) -> bool:
-    first = str(row[0]).strip().lower() if row and row[0] else ""
-    return first in ("total", "totais", "total da carteira")
-
-
 def parse_period_dates(pdf_bytes: bytes) -> Tuple[Optional[date], Optional[date]]:
-    """Extract period_start and period_end from the first page of the PDF."""
     import pdfplumber
     with pdfplumber.open(__import__("io").BytesIO(pdf_bytes)) as pdf:
         text = pdf.pages[0].extract_text() or ""
-    # Pattern: "Data do extrato: 2026-03-01 - 2026-03-31"
     m = re.search(r"Data do extrato[:\s]+(\d{4}-\d{2}-\d{2})\s*[-–]\s*(\d{4}-\d{2}-\d{2})", text)
     if m:
         try:
@@ -221,196 +170,131 @@ def parse_account_number(pdf_bytes: bytes) -> Optional[str]:
     return None
 
 
-def _parse_carteira_table(pdf_bytes: bytes) -> Tuple[List[ParsedPosition], float, List[str]]:
-    """Extract positions from the CARTEIRA table."""
-    import pdfplumber
-    positions = []
-    total_usd = 0.0
-    warnings = []
-
-    with pdfplumber.open(__import__("io").BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                if not table:
-                    continue
-                # Find header row
-                header_idx = None
-                for i, row in enumerate(table):
-                    if row and _is_header_row(row):
-                        header_idx = i
-                        break
-                if header_idx is None:
-                    continue
-
-                data_rows = table[header_idx + 1:]
-
-                # First pass: merge CUSIP-only rows
-                parsed_rows = []
-                i = 0
-                while i < len(data_rows):
-                    row = data_rows[i]
-                    if not row or not any(c and str(c).strip() for c in row):
-                        i += 1
-                        continue
-                    # Check if this is a CUSIP-only row (only col 1 has content)
-                    non_empty_cols = [j for j, c in enumerate(row) if c and str(c).strip()]
-                    if non_empty_cols == [1] and parsed_rows:
-                        # Merge into previous row's cusip
-                        parsed_rows[-1]["cusip"] = str(row[1]).strip()
-                        i += 1
-                        continue
-                    # Normal row
-                    parsed_rows.append({"row": row, "cusip": None})
-                    i += 1
-
-                for item in parsed_rows:
-                    row = item["row"]
-                    extra_cusip = item.get("cusip")
-
-                    # Skip total row
-                    if _is_total_row(row):
-                        # Try to extract total
-                        for cell in row[1:]:
-                            v = _parse_float(str(cell) if cell else "")
-                            if v and v > 1000:
-                                total_usd = v
-                        continue
-
-                    if len(row) < 5:
-                        continue
-
-                    descricao = str(row[0]).strip() if row[0] else ""
-                    if not descricao:
-                        continue
-
-                    # Col 1: symbol / CUSIP (may contain \n)
-                    symbol, cusip_inline = _extract_symbol_cusip(str(row[1]) if row[1] else "")
-                    cusip = extra_cusip or cusip_inline
-
-                    quantidade = _parse_float(str(row[2]) if row[2] else "")
-                    # col 3 is "ativos alugados" — skip
-                    preco_usd = _parse_float(str(row[4]) if len(row) > 4 and row[4] else "")
-                    posicao_usd = _parse_float(str(row[5]) if len(row) > 5 and row[5] else "")
-                    posicao_anterior = _parse_float(str(row[6]) if len(row) > 6 and row[6] else "")
-                    pct_carteira = _parse_float(str(row[8]) if len(row) > 8 and row[8] else "")
-
-                    if quantidade is None or preco_usd is None or posicao_usd is None:
-                        warnings.append(f"Fila incompleta ignorada: {descricao[:50]}")
-                        continue
-
-                    positions.append(ParsedPosition(
-                        descricao=descricao,
-                        symbol=symbol,
-                        cusip=cusip,
-                        quantidade=quantidade,
-                        preco_usd=preco_usd,
-                        posicao_usd=posicao_usd,
-                        posicao_anterior_usd=posicao_anterior or 0.0,
-                        pct_carteira=pct_carteira or 0.0,
-                    ))
-
-    return positions, total_usd, warnings
-
-
-def parse_atividade(pdf_bytes: bytes) -> Tuple[List[ParsedDividend], List[str]]:
-    """Extract CASH_DIVIDEND events from the ATIVIDADE table."""
-    import pdfplumber
-    dividends = []
-    warnings = []
-
-    with pdfplumber.open(__import__("io").BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
-                if not table:
-                    continue
-                # Find header with "Tipo de transação" and "Valor líquido"
-                header_idx = None
-                for i, row in enumerate(table):
-                    joined = " ".join(str(c) for c in row if c).lower()
-                    if "tipo de transa" in joined and ("valor" in joined or "líquido" in joined):
-                        header_idx = i
-                        break
-                if header_idx is None:
-                    continue
-
-                header = table[header_idx]
-                # Detect column indices
-                tipo_col = next((j for j, h in enumerate(header) if h and "tipo" in str(h).lower()), 0)
-                symbol_col = next((j for j, h in enumerate(header) if h and "símbolo" in str(h).lower()), 1)
-                desc_col = next((j for j, h in enumerate(header) if h and "descri" in str(h).lower()), 2)
-                date_col = next((j for j, h in enumerate(header) if h and "data" in str(h).lower()), 3)
-                valor_col = next((j for j, h in enumerate(header) if h and "valor" in str(h).lower()), 4)
-
-                for row in table[header_idx + 1:]:
-                    if not row or not any(c and str(c).strip() for c in row):
-                        continue
-                    tipo = str(row[tipo_col]).strip() if row[tipo_col] else ""
-                    if tipo.upper() != "CASH_DIVIDEND":
-                        continue
-
-                    symbol_cell = str(row[symbol_col]).strip() if len(row) > symbol_col and row[symbol_col] else ""
-                    symbol, cusip = _extract_symbol_cusip(symbol_cell)
-
-                    desc = str(row[desc_col]).strip() if len(row) > desc_col and row[desc_col] else ""
-                    valor_liquido = _parse_float(str(row[valor_col]) if len(row) > valor_col and row[valor_col] else "")
-
-                    if valor_liquido is None:
-                        warnings.append(f"Dividendo sin valor líquido: {desc[:50]}")
-                        continue
-
-                    # Parse description fields
-                    div_match = re.search(r"Cash Div of ([\d.]+) on ([\d.]+) shs\.", desc)
-                    pay_match = re.search(r"Pay (\d{2}/\d{2}/\d{2})", desc)
-                    rec_match = re.search(r"Rec (\d{2}/\d{2}/\d{2})", desc)
-                    wht_match = re.search(r"(\d+)%\s*NON Resident Alien Withholding", desc, re.IGNORECASE)
-
-                    dividend_per_share = float(div_match.group(1)) if div_match else 0.0
-                    shares = float(div_match.group(2)) if div_match else 0.0
-                    pay_date = _parse_short_date(pay_match.group(1)) if pay_match else None
-                    rec_date = _parse_short_date(rec_match.group(1)) if rec_match else None
-                    withholding_rate = float(wht_match.group(1)) / 100.0 if wht_match else 0.0
-
-                    # Try date column as fallback for pay_date
-                    if pay_date is None and len(row) > date_col and row[date_col]:
-                        date_str = str(row[date_col]).strip()
-                        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y"):
-                            try:
-                                pay_date = datetime.strptime(date_str, fmt).date()
-                                break
-                            except ValueError:
-                                pass
-
-                    if pay_date is None:
-                        warnings.append(f"Dividendo sin fecha de pago: {desc[:50]}")
-                        continue
-
-                    dividends.append(ParsedDividend(
-                        pay_date=pay_date,
-                        rec_date=rec_date,
-                        symbol=symbol,
-                        cusip=cusip,
-                        shares=shares,
-                        dividend_per_share=dividend_per_share,
-                        valor_liquido_usd=valor_liquido,
-                        withholding_rate=withholding_rate,
-                    ))
-
-    return dividends, warnings
-
-
 def parse_xp_international_pdf(pdf_bytes: bytes) -> ParsedReport:
-    """Main entry point: parse a full XP International PDF statement."""
+    """Main entry point: parse a full XP International PDF statement using text extraction."""
+    import pdfplumber
     warnings: List[str] = []
 
     period_start, period_end = parse_period_dates(pdf_bytes)
     account_number = parse_account_number(pdf_bytes)
-    positions, total_usd, pos_warnings = _parse_carteira_table(pdf_bytes)
-    dividends, div_warnings = parse_atividade(pdf_bytes)
 
-    warnings.extend(pos_warnings)
-    warnings.extend(div_warnings)
+    pages_text = []
+    with pdfplumber.open(__import__("io").BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages:
+            t = page.extract_text()
+            if t:
+                pages_text.append(t)
+                
+    full_text = "\n".join(pages_text)
+    lines = full_text.split('\n')
+    
+    positions = []
+    in_carteira = False
+    
+    pos_line_re = re.compile(r'^(.*?)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)\s+([\d.,]+)$')
+    curr_pos = None
+    total_usd = 0.0
+
+    for line in lines:
+        line = line.strip()
+        if not line: continue
+        
+        if line == "CARTEIRA":
+            in_carteira = True
+            continue
+            
+        if in_carteira:
+            if line.startswith("Total ") and "CARTEIRA" not in line:
+                in_carteira = False
+                try:
+                    total_usd = float(line.split()[1].replace(".", "").replace(",", "."))
+                except:
+                    pass
+                continue
+            if "Descrição Símbolo" in line or "CUSIP anterior" in line:
+                continue
+            
+            m = pos_line_re.match(line)
+            if m:
+                if curr_pos:
+                    positions.append(curr_pos)
+                
+                desc_sym = m.group(1).split()
+                symbol = None
+                if len(desc_sym) > 1 and len(desc_sym[-1]) <= 5 and desc_sym[-1].isupper() and desc_sym[-1].isalpha():
+                    symbol = desc_sym[-1]
+                    desc = " ".join(desc_sym[:-1])
+                else:
+                    desc = " ".join(desc_sym)
+                
+                curr_pos = ParsedPosition(
+                    descricao=desc,
+                    symbol=symbol,
+                    cusip=None,
+                    quantidade=_parse_float(m.group(2)) or 0.0,
+                    preco_usd=_parse_float(m.group(4)) or 0.0,
+                    posicao_usd=_parse_float(m.group(5)) or 0.0,
+                    posicao_anterior_usd=_parse_float(m.group(6)) or 0.0,
+                    pct_carteira=_parse_float(m.group(8)) or 0.0,
+                )
+            elif curr_pos:
+                tokens = line.split()
+                if len(tokens[-1]) == 9 and tokens[-1].isalnum():
+                    curr_pos.cusip = tokens[-1]
+                    if len(tokens) > 1:
+                        curr_pos.descricao += " " + " ".join(tokens[:-1])
+                else:
+                    curr_pos.descricao += " " + line
+                    
+    if curr_pos:
+        positions.append(curr_pos)
+
+    # Dividends
+    dividends = []
+    div_blocks = re.findall(r'(\d{4}-\d{2}-\d{2})\s+CASH_DIVIDEND\s+(.*?)(?=\d{4}-\d{2}-\d{2}\s+(?:CASH_DIVIDEND|TRANSFER)|$)', full_text, re.DOTALL)
+    
+    for date_str, block in div_blocks:
+        block_clean = " ".join(block.split())
+        
+        m_val = re.search(r'0,00\s+([\d.,]+)\s+0,00', block_clean)
+        val_usd = _parse_float(m_val.group(1)) if m_val else 0.0
+        
+        m_div = re.search(r'(?:Div|of)\s+([\d.]+)\s+on\s+([\d.]+)\s+shs', block_clean)
+        div_per_share = float(m_div.group(1)) if m_div else 0.0
+        shares = float(m_div.group(2)) if m_div else 0.0
+        
+        m_cusip = re.search(r'\b([A-Z0-9]{9})\b', block_clean)
+        cusip = m_cusip.group(1) if m_cusip else None
+        
+        m_wht = re.search(r'(\d+)%\s*NON Resident Alien', block_clean, re.IGNORECASE)
+        wht = float(m_wht.group(1))/100.0 if m_wht else 0.0
+        
+        m_pay = re.search(r'Pay\s+(\d{2}/\d{2}/\d{2})', block_clean)
+        if m_pay:
+            pay_date = _parse_short_date(m_pay.group(1))
+        else:
+            try:
+                pay_date = date.fromisoformat(date_str)
+            except:
+                pay_date = date.today() # fallback
+                
+        symbol = None
+        if m_val:
+            prefix = block_clean[:m_val.start()].strip()
+            prefix_tokens = prefix.split()
+            if prefix_tokens and len(prefix_tokens[-1]) <= 5 and prefix_tokens[-1].isupper():
+                symbol = prefix_tokens[-1]
+                
+        dividends.append(ParsedDividend(
+            pay_date=pay_date, # type: ignore
+            rec_date=None,
+            symbol=symbol,
+            cusip=cusip,
+            shares=shares,
+            dividend_per_share=div_per_share,
+            valor_liquido_usd=val_usd, # type: ignore
+            withholding_rate=wht,
+        ))
 
     return ParsedReport(
         period_start=period_start,

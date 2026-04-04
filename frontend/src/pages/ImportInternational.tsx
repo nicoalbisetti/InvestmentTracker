@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   InternationalImportConfig,
@@ -10,6 +10,7 @@ import {
   confirmInternational,
 } from '../api/importInternational';
 import { fmtBRL, fmtUSD } from '../utils/formatters';
+import { getQuotes, QuoteData } from '../api/quotes';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,11 +95,36 @@ function Step1({ onNext, loading, error }: Step1Props) {
   const [file, setFile] = useState<File | null>(null);
   const [period, setPeriod] = useState(defaultPeriod());
   const [rate, setRate] = useState<string>('');
+  const [quotes, setQuotes] = useState<QuoteData[]>([]);
+  const [userEditedRate, setUserEditedRate] = useState(false);
   const [createNew, setCreateNew] = useState(true);
   const [importPrice, setImportPrice] = useState(true);
   const [importQty, setImportQty] = useState(true);
   const [drag, setDrag] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getQuotes().then(setQuotes).catch(console.error);
+  }, []);
+
+  useEffect(() => {
+    if (quotes.length > 0 && !userEditedRate) {
+      const q = quotes.find(q => q.date <= period);
+      if (q) {
+        setRate(String(q.usd_brl));
+      }
+    }
+  }, [period, quotes, userEditedRate]);
+
+  function handleRateChange(val: string) {
+    setRate(val);
+    setUserEditedRate(true);
+  }
+
+  function handlePeriodChange(val: string) {
+    setPeriod(val);
+    setUserEditedRate(false); // allow default to trigger again for new period
+  }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -171,7 +197,7 @@ function Step1({ onNext, loading, error }: Step1Props) {
             <input
               type="month"
               value={period.slice(0, 7)}
-              onChange={e => setPeriod(`${e.target.value}-01`)}
+              onChange={e => handlePeriodChange(`${e.target.value}-01`)}
               className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             />
           </div>
@@ -185,7 +211,7 @@ function Step1({ onNext, loading, error }: Step1Props) {
               min="0"
               placeholder="ej: 5.847"
               value={rate}
-              onChange={e => setRate(e.target.value)}
+              onChange={e => handleRateChange(e.target.value)}
               className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
             />
             <p className="text-xs text-gray-400 mt-1">Se sugerirá automáticamente tras subir el PDF</p>
