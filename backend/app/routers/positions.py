@@ -18,6 +18,19 @@ TYPE_ORDER = ["accion", "fii", "renta_fija", "fundo", "previdencia", "prestamos"
 router = APIRouter(prefix="/api/positions", tags=["positions"])
 
 
+@router.get("/custodians")
+def get_custodians(db: Session = Depends(get_db)):
+    """Return distinct custodian values present in instruments."""
+    rows = (
+        db.query(Instrument.custodian)
+        .filter(Instrument.custodian.isnot(None), Instrument.status == "activo")
+        .distinct()
+        .order_by(Instrument.custodian)
+        .all()
+    )
+    return [r[0] for r in rows]
+
+
 def _latest_positions_subquery(db: Session, month: Optional[str] = None):
     """Subquery: balance per instrument for a given month (YYYY-MM), or latest if not specified."""
     if month:
@@ -77,13 +90,19 @@ def _build_query(
     sort: str,
     order: str,
     with_position: bool = False,
+    historical: bool = False,
 ):
     query = (
         db.query(Instrument, latest.c.balance, latest.c.balance_usd, latest.c.unit_price, latest.c.avg_price, latest.c.quantity, latest.c.mp_id, latest.c.pos_date)
         .outerjoin(latest, Instrument.id == latest.c.iid)
     )
 
-    if status:
+    if historical:
+        # Historical view: show all instruments that had positions in that month, regardless of current status
+        if status:
+            query = query.filter(Instrument.status == status)
+        # No default status filter when historical
+    elif status:
         query = query.filter(Instrument.status == status)
     else:
         query = query.filter(Instrument.status == "activo")
@@ -141,8 +160,9 @@ def get_positions(
     with_position: bool = Query(False),
     db: Session = Depends(get_db),
 ):
+    historical = month is not None
     latest = _latest_positions_subquery(db, month=month)
-    query = _build_query(db, latest, custodian, type, currency, location, status, search, sort, order, with_position)
+    query = _build_query(db, latest, custodian, type, currency, location, status, search, sort, order, with_position, historical=historical)
     # Wrap as subquery to get accurate row count (avoids DISTINCT on multi-entity queries)
     count_sq = query.subquery()
     total = db.query(func.count()).select_from(count_sq).scalar()
@@ -162,7 +182,10 @@ def get_positions(
         .select_from(latest)
         .join(Instrument, Instrument.id == latest.c.iid)
     )
-    totals_q = totals_q.filter(Instrument.status == (status or "activo"))
+    if not historical:
+        totals_q = totals_q.filter(Instrument.status == (status or "activo"))
+    elif status:
+        totals_q = totals_q.filter(Instrument.status == status)
     if custodian:
         totals_q = totals_q.filter(Instrument.custodian.ilike(f"%{custodian}%"))
     if type:

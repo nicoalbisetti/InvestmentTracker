@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { CopyPlus, Activity, DollarSign, Loader2, Upload, Globe, Download } from 'lucide-react';
-import { getPositions, exportPositions, PositionFilters } from '../api/positions';
+import { getPositions, exportPositions, getCustodians, PositionFilters } from '../api/positions';
 import { fmtBRL, fmtPct, fmtDate, INSTRUMENT_TYPE_LABELS } from '../utils/formatters';
 import { SkeletonTable } from '../components/ui/SkeletonLoader';
 import { getLastFixedIncomeDate } from '../api/importFixedIncome';
@@ -48,9 +48,11 @@ export default function Positions() {
   const isHistorical = priceMonth !== currentMonth;
   const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
   const [showReturns, setShowReturns] = useState(false);
+  const [custodianOptions, setCustodianOptions] = useState<string[]>([]);
 
   useEffect(() => {
     getLastFixedIncomeDate().then(r => setLastFixedIncomeDate(r.date)).catch(() => {});
+    getCustodians().then(setCustodianOptions).catch(() => {});
   }, []);
 
   const load = (f: PositionFilters) => {
@@ -60,7 +62,9 @@ export default function Positions() {
 
   useEffect(() => {
     const month = priceMonth !== currentMonth ? priceMonth : undefined;
-    const timer = setTimeout(() => load({ ...filters, search: search || undefined, month }), 300);
+    // In historical mode, don't filter by status — show all instruments that had positions then
+    const effectiveFilters = month ? { ...filters, status: undefined } : filters;
+    const timer = setTimeout(() => load({ ...effectiveFilters, search: search || undefined, month }), 300);
     return () => clearTimeout(timer);
   }, [filters, search, priceMonth]);
 
@@ -116,7 +120,7 @@ export default function Positions() {
           onChange={e => setFilters(f => ({ ...f, custodian: e.target.value || undefined, page: 1 }))}
         >
           <option value="">Todos los custodios</option>
-          {['HSBC', 'Bradesco', 'XP', 'Santander', 'Inter', 'CITI'].map(c => (
+          {custodianOptions.map(c => (
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
@@ -139,10 +143,12 @@ export default function Positions() {
         </select>
         <select
           className="input w-32"
-          value={filters.status || 'activo'}
+          value={isHistorical ? '' : (filters.status || 'activo')}
+          disabled={isHistorical}
           onChange={e => setFilters(f => ({ ...f, status: e.target.value || undefined, page: 1 }))}
         >
-          {STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {!isHistorical && STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          {isHistorical && <option value="">Todos los estados</option>}
         </select>
         <label className="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400 cursor-pointer select-none">
           <input

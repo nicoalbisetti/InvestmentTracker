@@ -118,7 +118,7 @@ def get_evolution(
     snapshots = query.all()
     result = []
     for s in snapshots:
-        value = s.total_usd if currency == "USD" else (s.total_with_prev or s.total_brl or 0)
+        value = s.total_usd if currency == "USD" else (s.total_brl or 0)
         result.append({
             "date": s.date.isoformat(),
             "value": value,
@@ -138,22 +138,20 @@ def get_distribution(db: Session = Depends(get_db)):
     if not latest_snap:
         return {"by_type": [], "by_custodian": []}
 
-    # By custodian from snapshot
-    by_custodian = []
-    custodian_fields = [
-        ("HSBC", latest_snap.hsbc_total),
-        ("Bradesco", latest_snap.bradesco_total),
-        ("XP BR", latest_snap.xp_br_total),
-        ("XP US", latest_snap.xp_us_total),
-        ("Santander", latest_snap.santander_total),
-        ("Inter", latest_snap.inter_total),
-        ("FGTS", latest_snap.fgts),
-        ("Previdencia", latest_snap.prev),
-        ("USA", latest_snap.usa_total),
-    ]
-    for name, val in custodian_fields:
-        if val and val > 0:
-            by_custodian.append({"name": name, "value": val})
+    # By custodian from latest monthly_positions of active instruments
+    custodian_sums = (
+        db.query(Instrument.custodian, func.sum(MonthlyPosition.balance_brl))
+        .join(MonthlyPosition, MonthlyPosition.instrument_id == Instrument.id)
+        .filter(
+            Instrument.status == "activo",
+            MonthlyPosition.date == latest_snap.date,
+            MonthlyPosition.balance_brl.isnot(None),
+            MonthlyPosition.balance_brl > 0,
+        )
+        .group_by(Instrument.custodian)
+        .all()
+    )
+    by_custodian = [{"name": c or "Otro", "value": v} for c, v in custodian_sums if v]
 
     # By type from active instruments
     from sqlalchemy import case

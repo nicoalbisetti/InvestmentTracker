@@ -8,9 +8,9 @@ import {
   ConfirmResponse,
   previewInternational,
   confirmInternational,
+  getUsdRateForMonth,
 } from '../api/importInternational';
 import { fmtBRL, fmtUSD } from '../utils/formatters';
-import { getQuotes, QuoteData } from '../api/quotes';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -65,14 +65,21 @@ function MatchBadge({ status }: { status: 'EXACT' | 'MAPPED' | 'NEW' }) {
   return <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cfg}`}>{label}</span>;
 }
 
-function DiffBadge({ status }: { status: 'NEW' | 'UPDATED' | 'UNCHANGED' | 'DISAPPEARED' }) {
+function DiffBadge({ status, willCreateInstrument }: { status: 'NEW' | 'UPDATED' | 'UNCHANGED' | 'DISAPPEARED'; willCreateInstrument?: boolean }) {
   const cfg = {
-    NEW: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
+    NEW: willCreateInstrument
+      ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
+      : 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
     UPDATED: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
     UNCHANGED: 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400',
     DISAPPEARED: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
   }[status];
-  const label = { NEW: 'Nuevo', UPDATED: 'Actualizado', UNCHANGED: 'Sin cambio', DISAPPEARED: 'Desaparecido' }[status];
+  const label = {
+    NEW: willCreateInstrument ? 'Instrumento nuevo' : '1er import',
+    UPDATED: 'Actualizado',
+    UNCHANGED: 'Sin cambio',
+    DISAPPEARED: 'Desaparecido',
+  }[status];
   return <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${cfg}`}>{label}</span>;
 }
 
@@ -94,9 +101,10 @@ interface Step1Props {
 function Step1({ onNext, loading, error }: Step1Props) {
   const [file, setFile] = useState<File | null>(null);
   const [period, setPeriod] = useState(defaultPeriod());
-  const [rate, setRate] = useState<string>('');
-  const [quotes, setQuotes] = useState<QuoteData[]>([]);
-  const [userEditedRate, setUserEditedRate] = useState(false);
+  const [rate, setRate] = useState<number | null>(null);
+  const [rateDate, setRateDate] = useState<string | null>(null);
+  const [rateLoading, setRateLoading] = useState(false);
+  const [rateError, setRateError] = useState<string | null>(null);
   const [createNew, setCreateNew] = useState(true);
   const [importPrice, setImportPrice] = useState(true);
   const [importQty, setImportQty] = useState(true);
@@ -104,26 +112,19 @@ function Step1({ onNext, loading, error }: Step1Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    getQuotes().then(setQuotes).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    if (quotes.length > 0 && !userEditedRate) {
-      const q = quotes.find(q => q.date <= period);
-      if (q) {
-        setRate(String(q.usd_brl));
-      }
-    }
-  }, [period, quotes, userEditedRate]);
-
-  function handleRateChange(val: string) {
-    setRate(val);
-    setUserEditedRate(true);
-  }
+    const month = period.slice(0, 7); // YYYY-MM
+    setRate(null);
+    setRateDate(null);
+    setRateError(null);
+    setRateLoading(true);
+    getUsdRateForMonth(month)
+      .then(({ rate, ref_date }) => { setRate(rate); setRateDate(ref_date); })
+      .catch(() => setRateError('No se pudo obtener la cotización'))
+      .finally(() => setRateLoading(false));
+  }, [period]);
 
   function handlePeriodChange(val: string) {
     setPeriod(val);
-    setUserEditedRate(false); // allow default to trigger again for new period
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -135,11 +136,7 @@ function Step1({ onNext, loading, error }: Step1Props) {
 
   function handleSubmit() {
     if (!file) return;
-    const rateNum = parseFloat(rate);
-    if (!rate || isNaN(rateNum) || rateNum <= 0) {
-      alert('Ingresá un tipo de cambio USD/BRL válido.');
-      return;
-    }
+    const rateNum = rate ?? 0;
     const cfg: InternationalImportConfig = {
       usd_brl_rate: rateNum,
       create_new_instruments: createNew,
@@ -203,18 +200,20 @@ function Step1({ onNext, loading, error }: Step1Props) {
           </div>
           <div className="flex-1">
             <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              Tipo de cambio USD/BRL
+              Cotización USD/BRL
             </label>
-            <input
-              type="number"
-              step="0.001"
-              min="0"
-              placeholder="ej: 5.847"
-              value={rate}
-              onChange={e => handleRateChange(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-            />
-            <p className="text-xs text-gray-400 mt-1">Se sugerirá automáticamente tras subir el PDF</p>
+            <div className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 min-h-[38px] flex items-center">
+              {rateLoading && <span className="text-gray-400">Buscando...</span>}
+              {!rateLoading && rate !== null && (
+                <span className="font-mono font-medium">{rate.toFixed(4)}</span>
+              )}
+              {!rateLoading && rateError && (
+                <span className="text-red-500 text-xs">{rateError}</span>
+              )}
+            </div>
+            {rateDate && !rateLoading && (
+              <p className="text-xs text-gray-400 mt-1">Último cierre: {rateDate}</p>
+            )}
           </div>
         </div>
       </div>
@@ -411,7 +410,7 @@ function Step2({ preview, onConfirm, loading, error }: Step2Props) {
                       <td className="px-3 py-2 text-right font-mono font-medium">{fmtUSD(d.posicao_usd)}</td>
                       <td className="px-3 py-2 text-right font-mono">{fmtBRL(d.posicao_usd * rate)}</td>
                       <td className="px-3 py-2 text-center"><MatchBadge status={d.match_status} /></td>
-                      <td className="px-3 py-2 text-center"><DiffBadge status={d.diff_status} /></td>
+                      <td className="px-3 py-2 text-center"><DiffBadge status={d.diff_status} willCreateInstrument={d.will_create_instrument} /></td>
                       <td className="px-2 py-2 text-center">
                         {d.warnings.length > 0 && (
                           <span title={d.warnings.join('\n')} className="text-yellow-500 cursor-help">⚠</span>

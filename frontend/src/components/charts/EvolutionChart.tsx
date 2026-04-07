@@ -49,7 +49,11 @@ export default function EvolutionChart({ data, currency = 'BRL', height = 300 }:
         />
         <Tooltip
           formatter={(val: any) => [fmt(val), 'Total']}
-          labelFormatter={label => fmtDate(label)}
+          labelFormatter={label => {
+            const [y, m] = label.split('-');
+            const lastDay = new Date(Number(y), Number(m), 0).getDate();
+            return fmtDate(`${y}-${m}-${String(lastDay).padStart(2, '0')}`);
+          }}
           contentStyle={{ background: 'var(--tw-bg, #fff)', border: '1px solid #e5e7eb', borderRadius: 8 }}
         />
         <Area

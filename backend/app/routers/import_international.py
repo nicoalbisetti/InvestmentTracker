@@ -31,6 +31,22 @@ from app.services.international_importer import (
 router = APIRouter(prefix="/api/import/international", tags=["import-international"])
 
 
+@router.get("/usd-rate")
+def get_usd_rate_for_month(month: str):
+    """Return the last USD/BRL closing rate for a given month (YYYY-MM)."""
+    import calendar
+    try:
+        year, mon = map(int, month.split("-"))
+        last_day = calendar.monthrange(year, mon)[1]
+        ref_date = date(year, mon, last_day)
+    except Exception:
+        raise HTTPException(status_code=422, detail="month debe ser YYYY-MM")
+    rate = get_usd_brl_rate(ref_date)
+    if rate is None:
+        raise HTTPException(status_code=404, detail="No se pudo obtener la cotización para ese período")
+    return {"rate": round(rate, 4), "ref_date": ref_date.isoformat()}
+
+
 @router.post("/debug-pdf")
 async def debug_pdf(file: UploadFile = File(...)):
     """Return raw pdfplumber extraction for debugging parser issues."""

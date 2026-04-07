@@ -24,6 +24,14 @@ TOKEN_TTL_MINUTES = 30
 BOND_PATTERN = re.compile(r"(\d+\.?\d*)%,\s+(\d{2}/\d{2}/\d{4})")
 UST_MARKER = "UNITED STATES TREASURY"
 
+def _parse_us_date(d_str: str) -> Optional[date]:
+    if not d_str:
+        return None
+    try:
+        return datetime.strptime(d_str.strip(), "%m/%d/%Y").date()
+    except ValueError:
+        return None
+
 
 # ─── Pydantic Models ──────────────────────────────────────────────────────────
 
@@ -106,7 +114,13 @@ class InternationalDiffItem(BaseModel):
     instrument_id: Optional[int] = None
     instrument_name_bd: Optional[str] = None
     balance_usd_bd: Optional[float] = None
+    # diff_status refers to the monthly position (not the instrument):
+    #   "NEW"       → no MonthlyPosition exists for this instrument+date (may or may not create a new instrument)
+    #   "UPDATED"   → MonthlyPosition exists and values differ
+    #   "UNCHANGED" → MonthlyPosition exists and values match
+    # To know if a new Instrument row will be created: check match_status == "NEW"
     diff_status: Literal["NEW", "UPDATED", "UNCHANGED", "DISAPPEARED"]
+    will_create_instrument: bool = False  # True only when match_status=="NEW" and instrument doesn't exist
     warnings: List[str] = []
 
 
@@ -354,7 +368,7 @@ def match_instrument(
             db.query(Instrument)
             .filter(
                 Instrument.ticker == parsed.cusip,
-                Instrument.custodian == "XP_INTERNATIONAL",
+                Instrument.custodian.in_(["XP_INTERNATIONAL", "XP_INTERNACIONAL"]),
             )
             .first()
         )
@@ -367,19 +381,36 @@ def match_instrument(
             db.query(Instrument)
             .filter(
                 Instrument.ticker == parsed.symbol,
-                Instrument.custodian == "XP_INTERNATIONAL",
+                Instrument.custodian.in_(["XP_INTERNATIONAL", "XP_INTERNACIONAL"]),
             )
             .first()
         )
         if inst:
             return MatchResult(status="EXACT", instrument_id=inst.id, match_key=f"ticker:{parsed.symbol}")
 
-    # Step 3: check instrument_code_mappings
-    keys_to_check = [k for k in [parsed.cusip, parsed.symbol] if k]
+    # Step 3: check instrument_code_mappings by CUSIP, symbol, or description
+    keys_to_check = []
+    for k in [parsed.cusip, parsed.symbol, parsed.descricao]:
+        if k and k not in keys_to_check:
+            keys_to_check.append(k)
+
     for key in keys_to_check:
         mapping = db.query(InstrumentCodeMapping).filter(InstrumentCodeMapping.codigo_excel == key).first()
         if mapping:
             return MatchResult(status="MAPPED", instrument_id=mapping.instrument_id, match_key=f"mapping:{key}")
+
+    # Step 4: match by instrument name for bonds (handles re-imports where CUSIP wasn't parsed)
+    if parsed.descricao and not parsed.symbol:
+        inst = (
+            db.query(Instrument)
+            .filter(
+                Instrument.name == parsed.descricao,
+                Instrument.custodian.in_(["XP_INTERNATIONAL", "XP_INTERNACIONAL"]),
+            )
+            .first()
+        )
+        if inst:
+            return MatchResult(status="EXACT", instrument_id=inst.id, match_key=f"name:{parsed.descricao}")
 
     return MatchResult(status="NEW", instrument_id=None, match_key="")
 
@@ -391,13 +422,12 @@ def get_usd_brl_rate(reference_date: date) -> Optional[float]:
         import yfinance as yf
         start = reference_date - timedelta(days=7)
         end = reference_date + timedelta(days=1)
-        data = yf.download("BRL=X", start=start, end=end, progress=False, auto_adjust=True)
-        if data.empty:
+        tk = yf.Ticker("USDBRL=X")
+        hist = tk.history(start=start, end=end)
+        if hist.empty:
             return None
-        close = data["Close"]
-        if hasattr(close, "iloc"):
-            val = float(close.iloc[-1])
-            return val if val > 0 else None
+        val = float(hist["Close"].iloc[-1])
+        return val if val > 0 else None
     except Exception:
         pass
     return None
@@ -437,7 +467,6 @@ def compute_position_diffs(
                 .filter(
                     MonthlyPosition.instrument_id == match.instrument_id,
                     MonthlyPosition.date == period_date,
-                    MonthlyPosition.custodian_override == "XP_INTERNATIONAL",
                 )
                 .first()
             )
@@ -450,7 +479,8 @@ def compute_position_diffs(
             else:
                 diff_status = "NEW"
 
-        if match.status == "NEW":
+        will_create_instrument = match.status == "NEW"
+        if will_create_instrument:
             warnings.append("Sin match en BD — se creará nuevo instrumento si create_new_instruments=True")
 
         diffs.append(InternationalDiffItem(
@@ -474,6 +504,7 @@ def compute_position_diffs(
             instrument_name_bd=instrument_name_bd,
             balance_usd_bd=balance_usd_bd,
             diff_status=diff_status,
+            will_create_instrument=will_create_instrument,
             warnings=warnings,
         ))
     return diffs
@@ -543,9 +574,20 @@ def check_dividend_duplicates(
 
 # ─── Apply Import ─────────────────────────────────────────────────────────────
 
-def _get_or_create_instrument(diff: InternationalDiffItem, db: Session) -> int:
-    """Create a new Instrument from the diff classification data."""
+def _get_or_create_instrument(diff: InternationalDiffItem, db: Session) -> Tuple[int, bool]:
+    """Find an existing instrument or create a new one. Returns (instrument_id, was_created)."""
     ticker = diff.cusip or diff.symbol
+    if ticker:
+        existing = (
+            db.query(Instrument)
+            .filter(
+                Instrument.ticker == ticker,
+                Instrument.custodian.in_(["XP_INTERNATIONAL", "XP_INTERNACIONAL"]),
+            )
+            .first()
+        )
+        if existing:
+            return existing.id, False
     inst = Instrument(
         name=diff.descricao,
         ticker=ticker,
@@ -560,7 +602,7 @@ def _get_or_create_instrument(diff: InternationalDiffItem, db: Session) -> int:
     )
     db.add(inst)
     db.flush()
-    return inst.id
+    return inst.id, True
 
 
 def apply_import_positions(
@@ -593,16 +635,16 @@ def apply_import_positions(
             if not config.create_new_instruments:
                 skipped += 1
                 continue
-            instrument_id = _get_or_create_instrument(diff, db)
-            new_instruments += 1
+            instrument_id, was_created = _get_or_create_instrument(diff, db)
+            if was_created:
+                new_instruments += 1
 
-        # Upsert MonthlyPosition
+        # Upsert MonthlyPosition (overwrite any existing position for this instrument+date)
         mp = (
             db.query(MonthlyPosition)
             .filter(
                 MonthlyPosition.instrument_id == instrument_id,
                 MonthlyPosition.date == period_date,
-                MonthlyPosition.custodian_override == "XP_INTERNATIONAL",
             )
             .first()
         )
@@ -611,7 +653,6 @@ def apply_import_positions(
             mp = MonthlyPosition(
                 instrument_id=instrument_id,
                 date=period_date,
-                custodian_override="XP_INTERNATIONAL",
             )
             db.add(mp)
 

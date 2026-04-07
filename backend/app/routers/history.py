@@ -21,9 +21,9 @@ def _apply_instrument_filters(query, custodian=None, type_=None, market=None):
         query = query.filter(Instrument.type == type_)
     elif market:
         if market == "exterior":
-            query = query.filter(Instrument.type == "exterior")
+            query = query.filter(Instrument.location == "exterior")
         else:
-            query = query.filter(Instrument.type != "exterior")
+            query = query.filter(Instrument.location != "exterior")
     return query
 
 

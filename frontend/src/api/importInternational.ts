@@ -29,6 +29,7 @@ export interface InternationalDiffItem {
   instrument_name_bd: string | null;
   balance_usd_bd: number | null;
   diff_status: 'NEW' | 'UPDATED' | 'UNCHANGED' | 'DISAPPEARED';
+  will_create_instrument: boolean;
   warnings: string[];
 }
 
@@ -122,6 +123,11 @@ export const confirmInternational = async (
   payload: ConfirmRequest,
 ): Promise<ConfirmResponse> => {
   const res = await client.post('/api/import/international/confirm', payload);
+  return res.data;
+};
+
+export const getUsdRateForMonth = async (month: string): Promise<{ rate: number; ref_date: string }> => {
+  const res = await client.get(`/api/import/international/usd-rate?month=${month}`);
   return res.data;
 };
 
