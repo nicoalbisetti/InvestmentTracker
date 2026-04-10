@@ -1,0 +1,9 @@
+=============================================================================
+SPEC: TICKER DE RENTA VARIABLE EN DASHBOARD
+Archivo: specs/done/prompt_ticker_dashboard.txt
+Status: COMPLETADO — 2026-04-10
+=============================================================================
+
+Ver documento original provisto en sesión de 2026-04-10.
+Feature implementada: banda ticker animada en Dashboard con precio y variación
+del día para instrumentos accion/fii activos, usando yfinance con cache TTL 5 min.

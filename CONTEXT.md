@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 2 Abr 2026 (actualizado: Import Internacional XP).
+> Refleja el estado REAL del código al 10 Abr 2026 (actualizado: Ticker de renta variable en dashboard).
 
 ---
 
@@ -96,7 +96,8 @@ InvestmentTracker/
 │   │   │   ├── import_fixed_income.py
 │   │   │   ├── import_proventos.py
 │   │   │   ├── import_international.py
-│   │   │   └── equity_trades.py
+│   │   │   ├── equity_trades.py
+│   │   │   └── ticker.py
 │   │   ├── services/
 │   │   │   ├── importer.py
 │   │   │   ├── fixed_income_importer.py
@@ -141,6 +142,10 @@ InvestmentTracker/
 │   │   ├── context/
 │   │   │   ├── ThemeContext.tsx
 │   │   │   └── EnvContext.tsx          # Demo/Real env, persiste en localStorage
+│   │   ├── components/
+│   │   │   ├── layout/
+│   │   │   │   └── ...
+│   │   │   └── TickerBand.tsx          # Banda animada de tickers (marquee)
 │   │   ├── api/
 │   │   │   ├── client.ts               # Axios instance + X-Env header interceptor
 │   │   │   ├── dashboard.ts
@@ -154,7 +159,8 @@ InvestmentTracker/
 │   │   │   ├── importFixedIncome.ts
 │   │   │   ├── importProventos.ts
 │   │   │   ├── importInternational.ts
-│   │   │   └── equityTrades.ts
+│   │   │   ├── equityTrades.ts
+│   │   │   └── ticker.ts
 │   │   └── utils/
 │   │       └── formatters.ts
 │   └── package.json
@@ -505,6 +511,11 @@ InvestmentTracker/
 | GET | `/?date_from&date_to` | Lista de cotizaciones |
 | POST | `/` | Upsert cotización (usd_brl, bvmf3_price) |
 
+### `/api/ticker`
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/quotes` | Precios y variación del día de instrumentos accion/fii activos vía yfinance. Cache en memoria TTL 5 min. Tickers B3 con sufijo ".SA". Responde siempre HTTP 200. |
+
 ### Otros
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -517,9 +528,10 @@ InvestmentTracker/
 ## 6. Páginas del Frontend
 
 ### Dashboard (`/`)
+Banda ticker animada (TickerBand) al tope con precio y variación del día de instrumentos accion/fii.
 KPIs (total cartera, variación del mes, YTD, proventos pagados + proyección), gráfico de evolución,
 distribución por tipo/custodio, top/bottom 5, vencimientos.
-**API:** `/api/dashboard/kpis`, `/evolution`, `/distribution`, `/top-bottom`, `/benchmarks`, `/maturities`
+**API:** `/api/dashboard/kpis`, `/evolution`, `/distribution`, `/top-bottom`, `/benchmarks`, `/maturities`, `/api/ticker/quotes`
 
 ### Positions (`/positions`)
 Tabla de posiciones filtrable/paginable/sortable. Sort default: brasil→exterior→tipo→nombre.
@@ -710,6 +722,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Migración automática de schema en startup (`_migrate_provento_items`)
 - [x] Copiar posiciones del mes anterior al actual de forma segura para instrumentos activos
 - [x] Sincronización automática de pre-cálculos del PortfolioSnapshot al editar históricos (snapshot_sync)
+- [x] Ticker de renta variable en dashboard (yfinance, cache 5 min, animación marquee, hover pause)
 
 ---
 

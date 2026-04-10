@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { getDashboardKPIs, getEvolution, getDistribution, getTopBottom, getBenchmarks } from '../api/dashboard';
 import client from '../api/client';
+import TickerBand from '../components/TickerBand';
 import KpiCard from '../components/ui/KpiCard';
 import EvolutionChart from '../components/charts/EvolutionChart';
 import BenchmarkChart from '../components/charts/BenchmarkChart';
@@ -88,7 +89,12 @@ export default function Dashboard() {
   })();
 
   return (
-    <div className="space-y-6">
+    <div>
+      {/* Ticker band — full width, breaks out of p-6 padding */}
+      <div className="-mx-6 -mt-6 mb-6">
+        <TickerBand />
+      </div>
+      <div className="space-y-6">
       {/* No-price notice */}
       {noPriceCount > 0 && (
         <div className="text-xs text-gray-400 text-right -mb-4">
@@ -261,6 +267,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );
