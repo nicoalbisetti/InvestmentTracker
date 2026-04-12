@@ -1,0 +1,311 @@
+=============================================================================
+INVESTMENT TRACKER — RESCATE TOTAL DE INSTRUMENTO
+Especificación completa para Claude Code
+=============================================================================
+
+## PASO 0 — Antes de cualquier otra cosa
+
+1. Crear el archivo de spec en el repositorio:
+   ```bash
+   cp prompt_rescate_total.txt specs/pending/prompt_rescate_total.txt
+   git add specs/pending/prompt_rescate_total.txt
+   git commit -m "docs: add spec for rescate total feature"
+   git push
+   ```
+
+2. Crear TASKS.md (o agregar sección "## Rescate Total") con checkboxes
+   de todas las tareas antes de escribir una sola línea de código.
+
+3. Actualizar ClickUp: crear una lista nueva "Rescate Total" dentro del
+   folder InvestmentTracker (folder_id=90177874339) usando
+   `clickup_create_list_in_folder`, y crear las tareas con
+   `clickup_create_task`.
+
+---
+
+## Convención de trabajo obligatoria
+
+Marcar cada tarea como completada en TASKS.md y en ClickUp antes de pasar
+a la siguiente. No proceder al siguiente paso sin completar el anterior.
+
+A medida que se completa cada tarea, ejecutar:
+```
+clickup_update_task(task_id="<ID>", status="complete")
+```
+
+---
+
+
+=============================================================================
+1. RESUMEN DE LA FUNCIONALIDAD
+=============================================================================
+
+Agregar en la tabla de Posiciones un ícono de "rescate total" por fila,
+visible únicamente para instrumentos de tipo `renta_fija` con status `activo`.
+
+Al hacer clic en el ícono:
+  1. Se muestra un modal de confirmación con los datos del instrumento.
+  2. El usuario puede editar la fecha de la transacción (default: hoy).
+  3. Al confirmar, el backend:
+     a. Crea una transacción de tipo `rescate` con el saldo actual.
+     b. Cambia el status del instrumento a `cerrado`.
+  4. La tabla de posiciones se recarga automáticamente (el instrumento
+     desaparece de la vista activo por defecto).
+
+
+=============================================================================
+2. ALCANCE Y RESTRICCIONES
+=============================================================================
+
+- El ícono SOLO aparece cuando:
+    • `instrument.type === "renta_fija"`
+    • `instrument.status === "activo"`
+
+- Si el instrumento tiene `currency === "USD"` (instrumentos exterior),
+  la transacción debe guardar AMBOS montos: `amount_brl` y `amount_usd`.
+  Para renta_fija estándar (BRL), solo `amount_brl`.
+
+- El monto de la transacción se toma del campo `balance_brl` (y `balance_usd`
+  cuando aplica) del item en la tabla de posiciones. Si `balance_brl` es null
+  o 0, mostrar un warning en el modal pero NO deshabilitar la acción.
+
+- NO crear un nuevo endpoint exclusivo si se puede reutilizar lógica existente.
+  Evaluar si alcanza con los endpoints ya disponibles:
+    • `PUT /api/instruments/{id}` → para cambiar status a "cerrado"
+    • `POST /api/transactions`    → para registrar el rescate
+  Si la lógica atómica (ambas operaciones en una sola llamada) es importante,
+  crear un endpoint dedicado. Ver sección 4 para la decisión tomada.
+
+
+=============================================================================
+3. BACKEND — NUEVO ENDPOINT
+=============================================================================
+
+### Archivo: backend/app/routers/instruments.py
+
+Agregar endpoint:
+
+  POST /api/instruments/{instrument_id}/rescate-total
+
+Body (JSON):
+  {
+    "date": "YYYY-MM-DD"       # requerido
+  }
+
+Lógica:
+  1. Buscar el instrumento por ID. Si no existe → 404.
+  2. Validar que `instrument.status == "activo"`. Si ya está cerrado → 400
+     con mensaje: "El instrumento ya está cerrado."
+  3. Validar que `instrument.type == "renta_fija"`. Si no → 400 con mensaje:
+     "El rescate total solo está disponible para instrumentos de renta fija."
+  4. Dentro de una transacción de DB atómica (try/finally con rollback):
+     a. Crear un registro en la tabla `Transaction`:
+          instrument_id = instrument.id
+          date          = payload.date (parsear como date)
+          type          = "rescate"
+          amount_brl    = instrument.current_balance_brl   (puede ser None)
+          amount_usd    = instrument.current_balance_usd   (puede ser None)
+          notes         = "Rescate total (automático)"
+     b. Cambiar `instrument.status = "cerrado"`.
+     c. Commit.
+  5. Retornar:
+     {
+       "message": "Rescate total registrado",
+       "transaction_id": <id de la nueva transacción>,
+       "instrument_id": <id>,
+       "instrument_name": <nombre>
+     }
+
+Errores esperados y sus códigos HTTP:
+  - 404: instrumento no encontrado
+  - 400: ya cerrado / tipo incorrecto
+  - 422: fecha inválida o ausente
+  - 500: error interno (rollback automático)
+
+Nota sobre current_balance_usd: verificar si el campo existe en el modelo
+`Instrument`. Si no existe, usar None para `amount_usd`.
+
+
+=============================================================================
+4. FRONTEND — TABLA DE POSICIONES
+=============================================================================
+
+### Archivo: frontend/src/pages/Positions.tsx
+
+#### 4.1 Ícono en la tabla
+
+En el `<tbody>`, en la última columna de cada fila, agregar el ícono de
+rescate total SOLO cuando se cumplen ambas condiciones:
+  - `item.type === "renta_fija"`
+  - `item.status === "activo"`  (o el filtro activo de la tabla lo garantiza)
+
+Ícono a usar: `ArrowDownCircle` de `lucide-react` (representa "extraer/rescatar").
+  - Tamaño: 16px
+  - Color base: `text-gray-400`
+  - Hover: `text-red-500`
+  - Cursor: `pointer`
+  - Tooltip: `title="Rescatar total"`
+
+Ubicación en la fila: misma celda de acciones donde otros iconos podrían vivir.
+Si actualmente no hay columna de acciones, agregar una columna vacía al final
+del `<thead>` (header sin texto, ancho mínimo).
+
+#### 4.2 Estado local necesario
+
+```typescript
+const [rescateTarget, setRescateTarget] = useState<{
+  id: number;
+  name: string;
+  custodian: string;
+  balance_brl: number | null;
+  balance_usd: number | null;
+} | null>(null);
+
+const [rescateDate, setRescateDate] = useState<string>('');
+const [rescateLoading, setRescateLoading] = useState(false);
+const [rescateError, setRescateError] = useState<string | null>(null);
+```
+
+Al hacer clic en el ícono:
+  1. Setear `rescateTarget` con los datos de la fila.
+  2. Setear `rescateDate` con la fecha de hoy en formato `YYYY-MM-DD`.
+  3. Limpiar `rescateError`.
+
+#### 4.3 Modal de confirmación
+
+Usar el componente `Modal` ya existente en `frontend/src/components/ui/Modal.tsx`.
+
+Contenido del modal:
+
+  Título: "Rescate Total"
+
+  Cuerpo:
+    - Nombre del instrumento (negrita, texto grande)
+    - Custodio (texto secundario gris)
+    - Separador visual
+    - Saldo BRL: valor formateado con `fmtBRL()`. Si es null → "Sin datos"
+    - Saldo USD (solo si `balance_usd != null`): valor formateado con `fmtUSD()`
+    - Separador visual
+    - Campo de fecha:
+        label: "Fecha de rescate"
+        input type="date"
+        value: rescateDate
+        onChange: actualizar rescateDate
+        required: true
+    - Si `balance_brl == null` o `balance_brl == 0`, mostrar alerta amarilla:
+        "⚠️ El saldo actual es cero o desconocido. La transacción se registrará
+         con monto R$ 0. Podés editarla después en Transacciones."
+    - Si `rescateError` tiene valor, mostrar alerta roja con el mensaje.
+
+  Pie del modal (botones):
+    - "Cancelar"  → cierra modal, limpia `rescateTarget`
+    - "Confirmar rescate"  → dispara handleRescateTotal()
+      • Estilo: `btn-primary` con color rojo (o clase `btn-danger` si existe,
+        sino agregar `bg-red-600 hover:bg-red-700 text-white`)
+      • Deshabilitar y mostrar spinner mientras `rescateLoading === true`
+
+#### 4.4 Función handleRescateTotal
+
+```typescript
+const handleRescateTotal = async () => {
+  if (!rescateTarget || !rescateDate) return;
+  setRescateLoading(true);
+  setRescateError(null);
+  try {
+    await rescateTotal(rescateTarget.id, rescateDate);
+    setRescateTarget(null);
+    load({ ...filters, search: search || undefined }); // recargar tabla
+  } catch (err: any) {
+    setRescateError(err.message || 'Error al procesar el rescate.');
+  } finally {
+    setRescateLoading(false);
+  }
+};
+```
+
+
+=============================================================================
+5. FRONTEND — API CLIENT
+=============================================================================
+
+### Archivo: frontend/src/api/instruments.ts
+
+Agregar función:
+
+```typescript
+export async function rescateTotal(
+  instrumentId: number,
+  date: string
+): Promise<{ message: string; transaction_id: number }> {
+  const res = await api.post(`/api/instruments/${instrumentId}/rescate-total`, { date });
+  return res.data;
+}
+```
+
+(El cliente `api` es el Axios existente con baseURL y header X-Env configurados.)
+
+
+=============================================================================
+6. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+1. El ícono de rescate SOLO aparece en filas donde `type === "renta_fija"`.
+   Para acciones, FIIs, fondos, exterior, etc., el ícono NO debe aparecer.
+
+2. Al hacer clic, el modal muestra correctamente:
+   - El nombre y custodio del instrumento.
+   - El saldo BRL formateado.
+   - La fecha de hoy pre-completada y editable.
+
+3. Si se confirma con fecha válida:
+   - Se crea la transacción en la tabla `Transaction` con type="rescate".
+   - El instrumento pasa a status="cerrado".
+   - La tabla de posiciones se recarga y el instrumento desaparece
+     (porque el filtro por defecto es status=activo).
+
+4. Si el instrumento ya está cerrado (race condition o error):
+   - El modal muestra el mensaje de error del backend (400).
+   - El modal NO se cierra hasta que el usuario presione Cancelar.
+
+5. Si el saldo es null o 0:
+   - La alerta amarilla aparece en el modal.
+   - El usuario puede confirmar igual.
+   - La transacción se registra con amount_brl = null o 0.
+
+6. El endpoint es atómico: si falla el commit de cualquiera de las dos
+   operaciones (crear transacción o cerrar instrumento), ninguna persiste.
+
+7. La función `rescateTotal` en el API client propaga correctamente los
+   errores del backend para que el modal los muestre.
+
+8. El botón "Confirmar rescate" queda deshabilitado mientras la request
+   está en vuelo (evitar doble submit).
+
+9. Después de un rescate exitoso, si el usuario va a Transacciones,
+   ve la nueva transacción de rescate registrada.
+
+10. TASKS.md se crea antes de empezar el código y se mantiene actualizado.
+
+
+=============================================================================
+## PASO FINAL
+
+1. Mover este archivo de spec:
+   ```bash
+   git mv specs/pending/prompt_rescate_total.txt specs/done/prompt_rescate_total.txt
+   git commit -m "docs: move rescate total spec to done"
+   git push
+   ```
+
+2. Actualizar CONTEXT.md:
+   - En "Features Implementados": agregar "[x] Rescate total de instrumento
+     (ícono en tabla de posiciones para renta fija)"
+   - En "Endpoints": agregar `POST /api/instruments/{id}/rescate-total`
+
+3. Actualizar PLAN.md con el feature completado.
+
+4. Marcar todas las tareas como complete en ClickUp.
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

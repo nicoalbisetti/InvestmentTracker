@@ -1,11 +1,44 @@
 import { useEffect, useRef, useState } from 'react';
-import { getInstruments, updateInstrument } from '../api/instruments';
+import { getInstruments, updateInstrument, createInstrument } from '../api/instruments';
 import { importExcel, getImportHistory, getImportDetail } from '../api/import';
 import Modal from '../components/ui/Modal';
 import { INSTRUMENT_TYPE_LABELS } from '../utils/formatters';
 import client from '../api/client';
 
 const TYPE_OPTIONS = Object.entries(INSTRUMENT_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }));
+
+const ASSET_CLASS_OPTIONS = ['CDB', 'CRI', 'CRA', 'DEB', 'LCA', 'LCI', 'LIG', 'TD', 'FUNDO_CREDITO'];
+const INDEX_TYPE_OPTIONS = ['PREFIXADO', 'IPCA', 'DI', 'SELIC'];
+
+interface CreateForm {
+  name: string;
+  custodian: string;
+  type: string;
+  currency: string;
+  status: string;
+  location: string;
+  liquidity: string;
+  maturity_date: string;
+  index_type: string;
+  asset_class: string;
+  balance_brl: string;
+  initial_period: string;
+}
+
+const defaultCreateForm: CreateForm = {
+  name: '',
+  custodian: '',
+  type: 'renta_fija',
+  currency: 'BRL',
+  status: 'activo',
+  location: 'brasil',
+  liquidity: '',
+  maturity_date: '',
+  index_type: '',
+  asset_class: '',
+  balance_brl: '',
+  initial_period: '',
+};
 
 type SortKey = 'name' | 'ticker' | 'custodian' | 'type' | 'status' | 'maturity_date';
 
@@ -24,6 +57,11 @@ function InstrumentCatalog() {
   const [editing, setEditing] = useState<any>(null);
   const [form, setForm] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateForm>(defaultCreateForm);
+  const [createSaving, setCreateSaving] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createWarning, setCreateWarning] = useState<string | null>(null);
 
   const load = () => {
     getInstruments({
@@ -105,6 +143,48 @@ function InstrumentCatalog() {
     load();
   };
 
+  const handleCreateInstrument = async () => {
+    if (!createForm.name.trim() || !createForm.custodian.trim()) {
+      setCreateError('Nombre y custodio son obligatorios.');
+      return;
+    }
+    const hasSaldo = createForm.balance_brl !== '' && Number(createForm.balance_brl) > 0;
+    if (hasSaldo && !createForm.initial_period) {
+      setCreateError('El período es requerido cuando se ingresa un saldo.');
+      return;
+    }
+    setCreateSaving(true);
+    setCreateError(null);
+    try {
+      const result = await createInstrument({
+        name: createForm.name.trim(),
+        custodian: createForm.custodian.trim(),
+        type: createForm.type,
+        currency: createForm.currency,
+        status: createForm.status,
+        location: createForm.location,
+        liquidity: createForm.liquidity || undefined,
+        maturity_date: createForm.maturity_date || undefined,
+        index_type: createForm.index_type || undefined,
+        asset_class: createForm.asset_class || undefined,
+        balance_brl: hasSaldo ? Number(createForm.balance_brl) : undefined,
+        initial_period: hasSaldo ? createForm.initial_period : undefined,
+      });
+      setShowCreate(false);
+      setCreateForm(defaultCreateForm);
+      if (result.warnings?.length > 0) {
+        setCreateWarning(result.warnings[0]);
+        setTimeout(() => setCreateWarning(null), 5000);
+      }
+      load();
+    } catch (err: any) {
+      const msg = err.response?.data?.detail || err.message || 'Error al crear el instrumento.';
+      setCreateError(msg);
+    } finally {
+      setCreateSaving(false);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3 h-[calc(100vh-160px)]">
       {/* Filter bar */}
@@ -172,7 +252,17 @@ function InstrumentCatalog() {
           Sin vencimiento
         </label>
         <span className="text-sm text-slate-400 ml-auto">{data.total} instrumentos</span>
+        <button className="btn-primary text-sm whitespace-nowrap" onClick={() => { setShowCreate(true); setCreateError(null); }}>
+          + Nuevo Instrumento
+        </button>
       </div>
+
+      {/* Warning banner post-creation */}
+      {createWarning && (
+        <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg px-4 py-2 text-sm text-amber-700 dark:text-amber-400">
+          ⚠️ {createWarning}
+        </div>
+      )}
 
       {/* Table */}
       <div className="card p-0 overflow-hidden flex flex-col min-h-0 flex-1">
@@ -246,6 +336,181 @@ function InstrumentCatalog() {
           </div>
         )}
       </div>
+
+      {/* Create Instrument Modal */}
+      <Modal
+        open={showCreate}
+        onClose={() => { setShowCreate(false); setCreateForm(defaultCreateForm); setCreateError(null); }}
+        title="Nuevo Instrumento"
+        size="md"
+      >
+        <div className="space-y-4">
+          {/* Nombre */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Nombre *</label>
+            <input
+              className="input w-full"
+              placeholder="Nombre completo del instrumento"
+              value={createForm.name}
+              onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))}
+            />
+          </div>
+          {/* Custodio */}
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-1">Custodio *</label>
+            <input
+              className="input w-full"
+              placeholder="XP, SANTANDER, INTER..."
+              value={createForm.custodian}
+              onChange={e => setCreateForm(f => ({ ...f, custodian: e.target.value }))}
+            />
+          </div>
+          {/* Tipo + Moneda */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Tipo *</label>
+              <select
+                className="input w-full"
+                value={createForm.type}
+                onChange={e => {
+                  const t = e.target.value;
+                  setCreateForm(f => ({ ...f, type: t, asset_class: t !== 'renta_fija' ? '' : f.asset_class, index_type: t !== 'renta_fija' ? '' : f.index_type }));
+                }}
+              >
+                {TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Moneda *</label>
+              <select
+                className="input w-full"
+                value={createForm.currency}
+                onChange={e => {
+                  const c = e.target.value;
+                  setCreateForm(f => ({ ...f, currency: c, location: c === 'USD' ? 'exterior' : f.location }));
+                }}
+              >
+                <option value="BRL">BRL</option>
+                <option value="USD">USD</option>
+              </select>
+            </div>
+          </div>
+          {/* Estado + Mercado */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Estado *</label>
+              <select className="input w-full" value={createForm.status} onChange={e => setCreateForm(f => ({ ...f, status: e.target.value }))}>
+                <option value="activo">Activo</option>
+                <option value="cerrado">Cerrado</option>
+                <option value="sin_datos">Sin datos</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Mercado *</label>
+              <select
+                className="input w-full"
+                value={createForm.location}
+                onChange={e => {
+                  const l = e.target.value;
+                  setCreateForm(f => ({ ...f, location: l, currency: l === 'exterior' && f.currency === 'BRL' ? 'USD' : f.currency }));
+                }}
+              >
+                <option value="brasil">Brasil</option>
+                <option value="exterior">Exterior</option>
+              </select>
+            </div>
+          </div>
+          {/* Asset Class + Indexador (solo renta_fija) */}
+          {createForm.type === 'renta_fija' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Asset Class</label>
+                <select className="input w-full" value={createForm.asset_class} onChange={e => setCreateForm(f => ({ ...f, asset_class: e.target.value }))}>
+                  <option value="">— ninguno —</option>
+                  {ASSET_CLASS_OPTIONS.map(a => <option key={a} value={a}>{a === 'FUNDO_CREDITO' ? 'Fondo de crédito' : a}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Indexador</label>
+                <select className="input w-full" value={createForm.index_type} onChange={e => setCreateForm(f => ({ ...f, index_type: e.target.value }))}>
+                  <option value="">— ninguno —</option>
+                  {INDEX_TYPE_OPTIONS.map(i => <option key={i} value={i}>{i}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+          {/* Liquidez + Vencimiento */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Liquidez</label>
+              <input className="input w-full" placeholder="D+0, D+2, D+30..." value={createForm.liquidity} onChange={e => setCreateForm(f => ({ ...f, liquidity: e.target.value }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-500 mb-1">Vencimiento</label>
+              <input type="date" className="input w-full" value={createForm.maturity_date} onChange={e => setCreateForm(f => ({ ...f, maturity_date: e.target.value }))} />
+            </div>
+          </div>
+          {/* Saldo inicial */}
+          <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Saldo inicial (opcional)</p>
+            <p className="text-xs text-gray-400 mb-3">Si no se completa, el instrumento se crea sin posición.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Saldo BRL</label>
+                <input
+                  type="number"
+                  className="input w-full"
+                  placeholder="0,00"
+                  min="0"
+                  step="0.01"
+                  value={createForm.balance_brl}
+                  onChange={e => setCreateForm(f => ({ ...f, balance_brl: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Período
+                  {createForm.balance_brl !== '' && Number(createForm.balance_brl) > 0 && !createForm.initial_period && (
+                    <span className="ml-1 text-red-500">*</span>
+                  )}
+                </label>
+                <input
+                  type="month"
+                  className={`input w-full ${createForm.balance_brl !== '' && Number(createForm.balance_brl) > 0 && !createForm.initial_period ? 'border-red-400 dark:border-red-500' : ''}`}
+                  value={createForm.initial_period}
+                  onChange={e => setCreateForm(f => ({ ...f, initial_period: e.target.value }))}
+                />
+                {createForm.balance_brl !== '' && Number(createForm.balance_brl) > 0 && !createForm.initial_period && (
+                  <p className="text-xs text-red-500 mt-1">Requerido si ingresás un saldo</p>
+                )}
+              </div>
+            </div>
+          </div>
+          {/* Error */}
+          {createError && (
+            <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg px-3 py-2 text-sm text-red-700 dark:text-red-400">
+              {createError}
+            </div>
+          )}
+          {/* Buttons */}
+          <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
+            <button
+              className="btn-secondary flex-1"
+              onClick={() => { setShowCreate(false); setCreateForm(defaultCreateForm); setCreateError(null); }}
+              disabled={createSaving}
+            >
+              Cancelar
+            </button>
+            <button
+              className="btn-primary flex-1 disabled:opacity-50"
+              onClick={handleCreateInstrument}
+              disabled={createSaving}
+            >
+              {createSaving ? 'Creando...' : 'Crear Instrumento'}
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {editing && (
         <Modal open={!!editing} onClose={() => setEditing(null)} title={`Editar: ${editing.name}`} size="lg">

@@ -1,0 +1,475 @@
+=============================================================================
+INVESTMENT TRACKER — CREACIÓN MANUAL DE INSTRUMENTO
+Especificación completa para Claude Code
+=============================================================================
+
+## PASO 0 — Antes de cualquier otra cosa
+
+1. Copiar este archivo al repositorio:
+   ```bash
+   cp prompt_nuevo_instrumento.txt specs/pending/prompt_nuevo_instrumento.txt
+   git add specs/pending/prompt_nuevo_instrumento.txt
+   git commit -m "docs: add spec for creación manual de instrumento"
+   git push
+   ```
+
+2. Crear sección "## Nuevo Instrumento Manual" en TASKS.md con checkboxes
+   de todas las tareas antes de escribir código.
+
+3. Actualizar ClickUp: crear lista "Nuevo Instrumento Manual" dentro del
+   folder InvestmentTracker (folder_id=90177874339) usando
+   `clickup_create_list_in_folder`, y crear las tareas con
+   `clickup_create_task`. Embeber los IDs en este archivo antes de continuar.
+
+---
+
+## Convención de trabajo obligatoria
+
+Marcar cada tarea en TASKS.md y en ClickUp antes de pasar a la siguiente.
+```
+clickup_update_task(task_id="<ID>", status="complete")
+```
+
+---
+
+
+=============================================================================
+1. RESUMEN DE LA FUNCIONALIDAD
+=============================================================================
+
+Agregar en la página Settings → tab "Catálogo de Instrumentos" un botón
+"+ Nuevo Instrumento" que abre un modal con formulario completo para crear
+un instrumento manualmente.
+
+El instrumento creado queda disponible de inmediato en la tabla del catálogo
+y en la tabla de Posiciones.
+
+Opcionalmente, el usuario puede ingresar un saldo inicial en BRL junto con el
+período (mes/año) al que corresponde. El backend calcula automáticamente el
+`balance_usd` usando la cotización USD/BRL registrada para ese período en la
+tabla `quotes`. Si no hay cotización disponible para ese mes, se crea la
+posición igual pero con `balance_usd = null` y se devuelve un warning.
+
+Esta funcionalidad es útil para pre-registrar instrumentos antes de importar
+datos (flujo XP International), para dar de alta activos que no provienen de
+ningún extrato importable, o para cargar posiciones históricas de forma manual.
+
+
+=============================================================================
+2. BACKEND — NUEVO ENDPOINT
+=============================================================================
+
+### Archivo: backend/app/routers/instruments.py
+
+Agregar endpoint:
+
+  POST /api/instruments
+
+Body (JSON):
+  {
+    "name":           string,        // requerido
+    "custodian":      string,        // requerido
+    "type":           string,        // requerido — ver valores válidos abajo
+    "currency":       string,        // requerido — "BRL" | "USD"
+    "status":         string,        // requerido — "activo" | "cerrado" | "sin_datos"
+    "location":       string,        // requerido — "brasil" | "exterior"
+    "liquidity":      string | null, // opcional — "D+0", "D+2", "D+30", etc.
+    "maturity_date":  string | null, // opcional — "YYYY-MM-DD"
+    "index_type":     string | null, // opcional — "PREFIXADO" | "IPCA" | "DI" | "SELIC"
+    "asset_class":    string | null, // opcional — ver valores válidos abajo
+
+    // Saldo inicial — todos opcionales, pero si se envía balance_brl
+    // también se debe enviar initial_period
+    "balance_brl":    float | null,  // opcional — saldo inicial en BRL
+    "initial_period": string | null, // "YYYY-MM" — requerido si balance_brl presente
+  }
+
+Valores válidos para `type`:
+  "renta_fija" | "accion" | "fii" | "fundo" | "previdencia" |
+  "prestamos" | "saving" | "fgts" | "outro"
+
+Valores válidos para `asset_class` (solo relevante cuando type="renta_fija"):
+  "CDB" | "CRI" | "CRA" | "DEB" | "LCA" | "LCI" | "LIG" | "TD" |
+  "FUNDO_CREDITO" | null
+
+Lógica:
+  1. Validar que `name` y `custodian` no estén vacíos.
+  2. Si `balance_brl` está presente y `initial_period` está ausente → 422
+     con mensaje: "Se requiere el período cuando se provee un saldo inicial."
+  3. Verificar que no exista ya un instrumento con el mismo (name, custodian).
+     Si existe → 409 Conflict con mensaje:
+     "Ya existe un instrumento con ese nombre y custodio."
+  4. Dentro de una transacción de DB atómica:
+     a. Crear el Instrument con todos los campos provistos.
+        Campos no enviados → defaults del modelo.
+     b. Si `balance_brl` está presente:
+        i.  Normalizar `initial_period` al día 1 del mes:
+              year, month = map(int, initial_period.split("-"))
+              pos_date = date(year, month, 1)
+        ii. Buscar la cotización USD/BRL para ese período:
+              quote = db.query(Quote).filter_by(date=pos_date).first()
+        iii. Calcular balance_usd:
+               Si quote y quote.usd_brl:
+                 balance_usd = round(balance_brl / quote.usd_brl, 2)
+                 usd_rate    = quote.usd_brl
+               Si no hay cotización:
+                 balance_usd = None
+                 usd_rate    = None
+                 agregar warning: "Sin cotización USD/BRL para {initial_period}
+                                   — balance_usd no calculado"
+        iv. Crear MonthlyPosition:
+              instrument_id = <nuevo id>
+              date          = pos_date
+              balance_brl   = payload.balance_brl
+              balance_usd   = balance_usd   (puede ser None)
+              usd_rate      = usd_rate      (puede ser None)
+        v.  Actualizar cache del instrumento:
+              instrument.current_balance_brl = payload.balance_brl
+     c. Commit.
+  5. Retornar:
+     {
+       "id": <id>,
+       "name": <nombre>,
+       "custodian": <custodio>,
+       "position_created": true | false,
+       "balance_usd": <valor calculado> | null,
+       "warnings": ["Sin cotización USD/BRL para 2026-03 — balance_usd no calculado"],
+       "message": "Instrumento creado correctamente"
+     }
+
+Errores:
+  - 400: name o custodian vacíos
+  - 409: duplicado (name + custodian)
+  - 422: tipo inválido, currency inválida, balance_brl sin initial_period,
+         initial_period con formato incorrecto (debe ser "YYYY-MM")
+
+### Schema Pydantic — agregar en backend/app/schemas/instrument.py
+
+El schema `InstrumentCreate` ya existe pero solo tiene los campos básicos.
+Reemplazarlo (o extenderlo) para incluir todos los campos del formulario:
+
+```python
+class InstrumentCreate(BaseModel):
+    name: str
+    custodian: str
+    type: str = "outro"
+    currency: str = "BRL"
+    status: str = "activo"
+    location: str = "brasil"
+    liquidity: Optional[str] = None
+    maturity_date: Optional[date] = None
+    index_type: Optional[str] = None
+    asset_class: Optional[str] = None
+    balance_brl: Optional[float] = None
+    initial_period: Optional[str] = None  # "YYYY-MM"
+```
+
+Verificar si `location` ya existe en el modelo Instrument (ver CONTEXT.md —
+sí existe). Si no existe en el modelo ORM actual, agregarlo con migration o
+con ALTER TABLE manual antes de usarlo.
+
+
+=============================================================================
+3. FRONTEND — SETTINGS.TSX
+=============================================================================
+
+### 3.1 Botón "+ Nuevo Instrumento"
+
+En el componente `InstrumentCatalog`, agregar en la barra de herramientas
+(la línea que tiene el input de búsqueda y el contador) un botón a la derecha:
+
+```
+[🔍 input buscar]   [N instrumentos]      [+ Nuevo Instrumento]
+```
+
+Clase del botón: `btn-primary text-sm`
+
+### 3.2 Estado local a agregar
+
+```typescript
+const [showCreate, setShowCreate] = useState(false);
+const [createForm, setCreateForm] = useState<CreateForm>(defaultCreateForm);
+const [createSaving, setCreateSaving] = useState(false);
+const [createError, setCreateError] = useState<string | null>(null);
+```
+
+Tipo `CreateForm`:
+```typescript
+interface CreateForm {
+  name: string;
+  custodian: string;
+  type: string;
+  currency: string;
+  status: string;
+  location: string;
+  liquidity: string;
+  maturity_date: string;
+  index_type: string;
+  asset_class: string;
+  balance_brl: string;       // string para el input; parsear a float al enviar
+  initial_period: string;    // "YYYY-MM"
+}
+```
+
+Valor inicial (`defaultCreateForm`):
+```typescript
+const defaultCreateForm: CreateForm = {
+  name: '',
+  custodian: '',
+  type: 'renta_fija',
+  currency: 'BRL',
+  status: 'activo',
+  location: 'brasil',
+  liquidity: '',
+  maturity_date: '',
+  index_type: '',
+  asset_class: '',
+  balance_brl: '',
+  initial_period: '',
+};
+```
+
+### 3.3 Modal de creación
+
+Usar el componente `Modal` existente.
+
+  Título: "Nuevo Instrumento"
+  Tamaño: `size="md"`
+
+Estructura del formulario (dos columnas donde aplique):
+
+  ── Fila 1 (col completa) ──
+  Nombre *
+    input text, placeholder "Nombre completo del instrumento"
+    validación: no vacío
+
+  Custodio *
+    input text, placeholder "XP, SANTANDER, INTER..."
+    validación: no vacío
+    Nota: libre — no dropdown, porque pueden aparecer custodios nuevos
+
+  ── Fila 2 (2 columnas) ──
+  Tipo *                          | Moneda *
+    select con TYPE_OPTIONS        |   select: BRL | USD
+
+  ── Fila 3 (2 columnas) ──
+  Estado *                        | Mercado *
+    select: Activo / Cerrado /     |   select: Brasil | Exterior
+    Sin datos                      |
+
+  ── Fila 4 (2 columnas, condicionales) ──
+  Asset Class                     | Indexador
+    select: CDB / CRI / CRA /      |   select: PREFIXADO / IPCA /
+    DEB / LCA / LCI / LIG / TD /   |   DI / SELIC / (vacío = ninguno)
+    Fondo de crédito / (vacío)     |
+    Solo visible si type ===       |
+    "renta_fija"                   |
+
+  ── Fila 5 (2 columnas) ──
+  Liquidez                        | Vencimiento
+    input text, placeholder         |   input type="date"
+    "D+0, D+2, D+30..."            |
+
+  ── Separador visual ──
+  Título secundario: "Saldo inicial (opcional)"
+  Texto de ayuda: "Si no se completa, el instrumento se crea sin posición."
+
+  ── Fila 6 (2 columnas) ──
+  Saldo BRL                       | Período
+    input type="number"             |   input type="month"  (selector mes/año
+    placeholder "0,00"              |   nativo del browser: "YYYY-MM")
+    min="0" step="0.01"             |   placeholder "MM/AAAA"
+
+  Nota UX: si `balance_brl` tiene valor pero `initial_period` está vacío,
+  marcar el campo de período con borde rojo y texto de error inline
+  ("Requerido si ingresás un saldo") ANTES de intentar enviar al backend.
+  No esperar la respuesta del servidor para este error de validación.
+
+  ── Alerta de resultado post-creación (si hay warnings del backend) ──
+  Mostrar alerta amarilla con el texto del warning (ej: cotización no encontrada)
+  DESPUÉS de que el instrumento se creó exitosamente. El modal se cierra y la
+  alerta aparece debajo del botón "+ Nuevo Instrumento" por 5 segundos,
+  usando un estado `createWarning: string | null`.
+  Alternativamente, si el componente tiene toasts disponibles, usar eso.
+
+  ── Error (si createError) ──
+  Alerta roja dentro del modal con el mensaje del backend.
+
+  ── Pie del modal ──
+  [Cancelar]    [Crear Instrumento]  (btn-primary, disabled mientras saving)
+
+### 3.4 Comportamiento dinámico
+
+- Cuando `type` cambia a algo distinto de `"renta_fija"`:
+    • Limpiar `asset_class` e `index_type`
+    • Ocultar visualmente las filas de Asset Class e Indexador
+
+- Cuando `currency` cambia a `"USD"`:
+    • Setear automáticamente `location = "exterior"`
+
+- Cuando `location` cambia a `"exterior"`:
+    • Setear automáticamente `currency = "USD"` si aún era `"BRL"`
+
+- El campo `initial_period` solo es requerido si `balance_brl` tiene valor.
+  Validar en el cliente antes de enviar.
+
+### 3.5 Función handleCreateInstrument
+
+```typescript
+const handleCreateInstrument = async () => {
+  if (!createForm.name.trim() || !createForm.custodian.trim()) {
+    setCreateError('Nombre y custodio son obligatorios.');
+    return;
+  }
+  const hasSaldo = createForm.balance_brl !== '' && Number(createForm.balance_brl) > 0;
+  if (hasSaldo && !createForm.initial_period) {
+    setCreateError('El período es requerido cuando se ingresa un saldo.');
+    return;
+  }
+  setCreateSaving(true);
+  setCreateError(null);
+  try {
+    const result = await createInstrument({
+      name: createForm.name.trim(),
+      custodian: createForm.custodian.trim(),
+      type: createForm.type,
+      currency: createForm.currency,
+      status: createForm.status,
+      location: createForm.location,
+      liquidity: createForm.liquidity || undefined,
+      maturity_date: createForm.maturity_date || undefined,
+      index_type: createForm.index_type || undefined,
+      asset_class: createForm.asset_class || undefined,
+      balance_brl: hasSaldo ? Number(createForm.balance_brl) : undefined,
+      initial_period: hasSaldo ? createForm.initial_period : undefined,
+    });
+    setShowCreate(false);
+    setCreateForm(defaultCreateForm);
+    if (result.warnings?.length > 0) {
+      setCreateWarning(result.warnings[0]);
+      setTimeout(() => setCreateWarning(null), 5000);
+    }
+    load(); // recargar tabla del catálogo
+  } catch (err: any) {
+    const msg = err.response?.data?.detail || err.message || 'Error al crear el instrumento.';
+    setCreateError(msg);
+  } finally {
+    setCreateSaving(false);
+  }
+};
+```
+
+Agregar al estado local:
+```typescript
+const [createWarning, setCreateWarning] = useState<string | null>(null);
+```
+
+Al cerrar el modal (onClose):
+  - Resetear `createForm` a `defaultCreateForm`
+  - Limpiar `createError`
+  - NO limpiar `createWarning` (debe seguir visible tras el cierre)
+
+
+=============================================================================
+4. FRONTEND — API CLIENT
+=============================================================================
+
+### Archivo: frontend/src/api/instruments.ts
+
+Agregar función:
+
+```typescript
+export async function createInstrument(data: {
+  name: string;
+  custodian: string;
+  type: string;
+  currency: string;
+  status: string;
+  location: string;
+  liquidity?: string;
+  maturity_date?: string;
+  index_type?: string;
+  asset_class?: string;
+  balance_brl?: number;
+  initial_period?: string;
+}): Promise<{
+  id: number;
+  name: string;
+  position_created: boolean;
+  balance_usd: number | null;
+  warnings: string[];
+  message: string;
+}> {
+  const res = await api.post('/api/instruments', data);
+  return res.data;
+}
+```
+
+
+=============================================================================
+5. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+1. El botón "+ Nuevo Instrumento" es visible en el tab "Catálogo de
+   Instrumentos" de Settings, a la derecha del contador.
+
+2. El modal se abre con todos los campos en sus valores default
+   (type=renta_fija, currency=BRL, status=activo, location=brasil).
+   Los campos de saldo inicial están vacíos.
+
+3. Intentar guardar con nombre vacío o custodio vacío muestra el error
+   de validación sin llegar al backend.
+
+4. Intentar guardar con balance_brl completado pero initial_period vacío
+   muestra el error de validación en el cliente, sin llegar al backend.
+
+5. Crear un instrumento sin saldo:
+   a. Se crea con current_balance_brl = null.
+   b. Aparece en el catálogo pero NO en la tabla de Posiciones con filtro
+      status=activo (a menos que el filtro lo incluya).
+   c. El modal se cierra y el formulario se resetea.
+
+6. Crear un instrumento con saldo BRL + período con cotización disponible:
+   a. Se crea la MonthlyPosition con balance_brl y balance_usd calculado.
+   b. El instrumento aparece en Posiciones con el saldo correcto.
+   c. No se muestra ningún warning.
+
+7. Crear un instrumento con saldo BRL + período SIN cotización disponible:
+   a. Se crea la MonthlyPosition con balance_brl y balance_usd = null.
+   b. El modal se cierra y aparece un warning amarillo visible por 5 segundos.
+
+8. Crear un instrumento con (name, custodian) duplicado retorna 409 y
+   el modal muestra el mensaje sin cerrarse.
+
+9. Las filas de Asset Class e Indexador solo aparecen cuando type === "renta_fija".
+
+10. Cambiar currency a "USD" setea location a "exterior" automáticamente.
+    Cambiar location a "exterior" setea currency a "USD" automáticamente.
+
+11. El botón "Crear Instrumento" queda deshabilitado durante el request.
+
+12. TASKS.md se crea antes de empezar el código y se mantiene actualizado.
+
+
+=============================================================================
+## PASO FINAL
+
+1. Mover spec a done:
+   ```bash
+   git mv specs/pending/prompt_nuevo_instrumento.txt specs/done/prompt_nuevo_instrumento.txt
+   git commit -m "docs: move nuevo instrumento spec to done"
+   git push
+   ```
+
+2. Actualizar CONTEXT.md:
+   - En "Features Implementados": agregar "[x] Creación manual de instrumento
+     con saldo inicial opcional (modal en Settings → Catálogo)"
+   - En "Endpoints": agregar `POST /api/instruments`
+
+3. Actualizar PLAN.md con el feature completado.
+
+4. Marcar todas las tareas como complete en ClickUp.
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

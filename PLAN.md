@@ -196,7 +196,7 @@ GET  /api/import/history              # Historial de importaciones
 |--------|------|-------------|
 | Dashboard | `/` | KPIs, grafico evolucion, donut distribucion, top/bottom 5 |
 | Posiciones | `/positions` | Tabla ranking con filtros y sort |
-| Histórico | `/history` | Matriz instrumento × período (mensual/anual), filtros custodio/tipo/mercado, toggle BRL/USD |
+| Histórico | `/history` | Matriz instrumento × período (mensual/anual), filtros instrumento/custodio/tipo/mercado, toggle BRL/USD |
 | Anual | `/annual` | Tabla + grafico barras apiladas |
 | Proventos | `/proventos` | Tabla + grafico mensual + proyeccion |
 | Transacciones | `/transactions` | CRUD transacciones manuales |
@@ -229,6 +229,8 @@ GET  /api/import/history              # Historial de importaciones
 - [x] Operaciones de Renta Variable — registro de compras/ventas, recálculo de posiciones, historial con P&L
 - [x] Importador XP International — wizard PDF (posiciones + dividendos), clasificación UST/CORP_BOND/ETF, matching CUSIP/ticker, fix update-equities-prices USD vs BRL
 - [x] Ticker de renta variable en dashboard — banda animada con precio y variación del día vía yfinance, cache 5 min
+- [x] Rescate total de instrumento — ícono en tabla de posiciones para renta fija activa, modal confirmación, endpoint atómico
+- [x] Creación manual de instrumento — botón + Nuevo Instrumento en Settings, modal formulario completo, saldo inicial opcional con cálculo automático de balance_usd
 
 ### Fase 4 — Frontend resto de paginas
 14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)

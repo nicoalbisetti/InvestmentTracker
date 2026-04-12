@@ -1,20 +1,30 @@
-# TASKS — Ticker de Renta Variable en Dashboard
+# Nuevo Instrumento Manual
 
-## Backend
+## Descripción
+Agregar en Settings → Catálogo de Instrumentos un botón "+ Nuevo Instrumento" que abre un modal con formulario completo para crear un instrumento manualmente, con saldo inicial opcional.
 
-- [ ] Backend: nuevo archivo `backend/app/routers/ticker.py` con helper `get_equity_tickers()` y cache en memoria
-- [ ] Backend: endpoint `GET /api/ticker/quotes` con cache TTL 5 min y lógica yfinance
-- [ ] Backend: registrar router en `main.py`
+## Tareas
 
-## Frontend
+### Backend
+- [x] Actualizar `InstrumentCreate` schema en `backend/app/schemas/instrument.py` con todos los campos nuevos
+- [x] Agregar endpoint `POST /api/instruments` en `backend/app/routers/instruments.py`
+  - Validar name/custodian no vacíos
+  - Verificar duplicado (name + custodian) → 409
+  - Crear Instrument
+  - Si hay balance_brl: crear MonthlyPosition, calcular balance_usd desde quotes, actualizar cache
 
-- [ ] Frontend: nuevo archivo `frontend/src/api/ticker.ts` con tipos e interfaz
-- [ ] Frontend: componente `TickerBand.tsx` con animación marquee, hover pause, shimmer loading
-- [ ] Frontend: integrar `TickerBand` en `Dashboard.tsx` con ancho completo (negative margins)
+### Frontend — API Client
+- [x] Agregar función `createInstrument(data)` en `frontend/src/api/instruments.ts`
 
-## Documentación
+### Frontend — Settings.tsx
+- [x] Agregar estados: `showCreate`, `createForm`, `createSaving`, `createError`, `createWarning`
+- [x] Agregar botón "+ Nuevo Instrumento" en la barra de filtros del catálogo
+- [x] Agregar modal de creación con formulario completo (2 columnas, campos condicionales)
+- [x] Comportamiento dinámico: currency↔location, asset_class/index_type ocultos si no renta_fija
+- [x] Implementar `handleCreateInstrument()` con validación cliente + llamada API
+- [x] Mostrar warning amarillo 5s después de creación exitosa con warning
 
-- [ ] Docs: actualizar `CONTEXT.md` con endpoint `/api/ticker/quotes` y feature TickerBand
-- [ ] Docs: actualizar `PLAN.md` marcando la tarea como completada
-- [ ] Docs: mover spec de `specs/pending/` a `specs/done/`
-- [ ] Docs: commit y push
+### Documentación
+- [x] Actualizar `CONTEXT.md`
+- [x] Actualizar `PLAN.md`
+- [x] Mover spec a `specs/done/`

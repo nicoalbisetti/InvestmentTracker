@@ -13,8 +13,19 @@ class InstrumentBase(BaseModel):
     status: str = "activo"
 
 
-class InstrumentCreate(InstrumentBase):
-    pass
+class InstrumentCreate(BaseModel):
+    name: str
+    custodian: str
+    type: str = "outro"
+    currency: str = "BRL"
+    status: str = "activo"
+    location: str = "brasil"
+    liquidity: Optional[str] = None
+    maturity_date: Optional[date] = None
+    index_type: Optional[str] = None
+    asset_class: Optional[str] = None
+    balance_brl: Optional[float] = None
+    initial_period: Optional[str] = None  # "YYYY-MM"
 
 
 class InstrumentUpdate(BaseModel):

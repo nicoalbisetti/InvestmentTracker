@@ -95,6 +95,7 @@ export default function History() {
   const [custodianFilter, setCustodianFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [marketFilter, setMarketFilter] = useState('');
+  const [instrumentFilter, setInstrumentFilter] = useState('');
 
   const [monthlyData, setMonthlyData] = useState<HistoryMonthlyResponse | null>(null);
   const [annualData, setAnnualData] = useState<HistoryAnnualResponse | null>(null);
@@ -103,7 +104,7 @@ export default function History() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const hasActiveFilters = !!(custodianFilter || typeFilter || marketFilter);
+  const hasActiveFilters = !!(custodianFilter || typeFilter || marketFilter || instrumentFilter);
 
   const buildFilters = useCallback((): HistoryFilters => {
     const f: HistoryFilters = {};
@@ -152,6 +153,7 @@ export default function History() {
     setCustodianFilter('');
     setTypeFilter('');
     setMarketFilter('');
+    setInstrumentFilter('');
   };
 
   const handleTypeChange = (val: string) => {
@@ -170,7 +172,9 @@ export default function History() {
       ? (monthlyData?.months ?? []).map(m => MONTH_NAMES[m - 1])
       : (annualData?.years ?? []);
   const totals = rawData?.totals ?? [];
-  const items: HistoryItem[] = sortItems(filterItems((rawData?.items ?? []) as HistoryItem[]));
+  const items: HistoryItem[] = sortItems(filterItems((rawData?.items ?? []) as HistoryItem[])).filter(
+    item => !instrumentFilter || item.name.toLowerCase().includes(instrumentFilter.toLowerCase())
+  );
 
   const stickyCol = 'sticky left-0 z-10';
   const headerBg = 'bg-gray-50 dark:bg-gray-800';
@@ -229,6 +233,14 @@ export default function History() {
         </div>
 
         <div className="flex flex-wrap gap-2 items-center">
+          <input
+            type="text"
+            className="input w-44 text-sm"
+            placeholder="Buscar instrumento..."
+            value={instrumentFilter}
+            onChange={e => setInstrumentFilter(e.target.value)}
+          />
+
           <select
             className="input w-40 text-sm"
             value={custodianFilter}

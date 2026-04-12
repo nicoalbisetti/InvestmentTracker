@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { CopyPlus, Activity, DollarSign, Loader2, Upload, Globe, Download } from 'lucide-react';
+import { CopyPlus, Activity, DollarSign, Loader2, Upload, Globe, Download, ArrowDownCircle } from 'lucide-react';
 import { getPositions, exportPositions, getCustodians, PositionFilters } from '../api/positions';
-import { fmtBRL, fmtPct, fmtDate, INSTRUMENT_TYPE_LABELS } from '../utils/formatters';
+import { fmtBRL, fmtPct, fmtDate, fmtUSD, INSTRUMENT_TYPE_LABELS } from '../utils/formatters';
 import { SkeletonTable } from '../components/ui/SkeletonLoader';
 import { getLastFixedIncomeDate } from '../api/importFixedIncome';
+import { rescateTotal } from '../api/instruments';
+import Modal from '../components/ui/Modal';
 import client from '../api/client';
 
 const TYPE_OPTIONS = Object.entries(INSTRUMENT_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }));
@@ -49,6 +51,16 @@ export default function Positions() {
   const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
   const [showReturns, setShowReturns] = useState(false);
   const [custodianOptions, setCustodianOptions] = useState<string[]>([]);
+  const [rescateTarget, setRescateTarget] = useState<{
+    id: number;
+    name: string;
+    custodian: string;
+    balance_brl: number | null;
+    balance_usd: number | null;
+  } | null>(null);
+  const [rescateDate, setRescateDate] = useState<string>('');
+  const [rescateLoading, setRescateLoading] = useState(false);
+  const [rescateError, setRescateError] = useState<string | null>(null);
 
   useEffect(() => {
     getLastFixedIncomeDate().then(r => setLastFixedIncomeDate(r.date)).catch(() => {});
@@ -89,6 +101,22 @@ export default function Positions() {
       order: f.sort === col && f.order === 'desc' ? 'asc' : 'desc',
       page: 1,
     }));
+  };
+
+  const handleRescateTotal = async () => {
+    if (!rescateTarget || !rescateDate) return;
+    setRescateLoading(true);
+    setRescateError(null);
+    try {
+      await rescateTotal(rescateTarget.id, rescateDate);
+      setRescateTarget(null);
+      const month = priceMonth !== currentMonth ? priceMonth : undefined;
+      load({ ...filters, search: search || undefined, month });
+    } catch (err: any) {
+      setRescateError(err.message || 'Error al procesar el rescate.');
+    } finally {
+      setRescateLoading(false);
+    }
   };
 
   const TH = ({ col, label }: { col: string; label: string }) => (
@@ -343,6 +371,78 @@ export default function Positions() {
         </div>
       )}
 
+      {/* Rescate Total Modal */}
+      <Modal
+        open={!!rescateTarget}
+        onClose={() => { setRescateTarget(null); setRescateError(null); }}
+        title="Rescate Total"
+        size="sm"
+      >
+        {rescateTarget && (
+          <div className="space-y-4">
+            <div>
+              <p className="text-base font-bold text-gray-900 dark:text-white">{rescateTarget.name}</p>
+              <p className="text-sm text-gray-500 dark:text-gray-400">{rescateTarget.custodian}</p>
+            </div>
+            <hr className="border-gray-200 dark:border-gray-700" />
+            <div className="space-y-1 text-sm">
+              <div className="flex justify-between">
+                <span className="text-gray-500">Saldo BRL</span>
+                <span className="font-mono font-medium">
+                  {rescateTarget.balance_brl != null ? fmtBRL(rescateTarget.balance_brl) : 'Sin datos'}
+                </span>
+              </div>
+              {rescateTarget.balance_usd != null && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Saldo USD</span>
+                  <span className="font-mono font-medium">{fmtUSD(rescateTarget.balance_usd)}</span>
+                </div>
+              )}
+            </div>
+            <hr className="border-gray-200 dark:border-gray-700" />
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Fecha de rescate
+              </label>
+              <input
+                type="date"
+                className="input w-full"
+                value={rescateDate}
+                onChange={e => setRescateDate(e.target.value)}
+                required
+              />
+            </div>
+            {(rescateTarget.balance_brl == null || rescateTarget.balance_brl === 0) && (
+              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-3 text-sm text-amber-700 dark:text-amber-400">
+                ⚠️ El saldo actual es cero o desconocido. La transacción se registrará con monto R$ 0. Podés editarla después en Transacciones.
+              </div>
+            )}
+            {rescateError && (
+              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg p-3 text-sm text-red-700 dark:text-red-400">
+                {rescateError}
+              </div>
+            )}
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                className="btn-secondary"
+                onClick={() => { setRescateTarget(null); setRescateError(null); }}
+                disabled={rescateLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-medium disabled:opacity-50 transition-colors"
+                onClick={handleRescateTotal}
+                disabled={rescateLoading || !rescateDate}
+              >
+                {rescateLoading && <Loader2 size={14} className="animate-spin" />}
+                Confirmar rescate
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       {/* Table */}
       <div className="card p-0 overflow-hidden">
         {loading ? (
@@ -476,7 +576,29 @@ export default function Positions() {
                             </Link>
                           </td>
                         )}
-                        {row.type !== 'accion' && row.type !== 'fii' && <td />}
+                        {row.type === 'renta_fija' && row.status === 'activo' && (
+                          <td className="px-3 py-2.5">
+                            <button
+                              title="Rescatar total"
+                              className="text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                              onClick={() => {
+                                setRescateTarget({
+                                  id: row.id,
+                                  name: row.name,
+                                  custodian: row.custodian,
+                                  balance_brl: row.balance_brl ?? null,
+                                  balance_usd: row.balance_usd ?? null,
+                                });
+                                setRescateDate(new Date().toISOString().split('T')[0]);
+                                setRescateError(null);
+                              }}
+                            >
+                              <ArrowDownCircle size={16} />
+                            </button>
+                          </td>
+                        )}
+                        {row.type !== 'accion' && row.type !== 'fii' && row.type !== 'renta_fija' && <td />}
+                        {row.type === 'renta_fija' && row.status !== 'activo' && <td />}
                       </tr>
                     );
                   })}

@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 10 Abr 2026 (actualizado: Ticker de renta variable en dashboard).
+> Refleja el estado REAL del código al 10 Abr 2026 (actualizado: Filtro por instrumento en histórico).
 
 ---
 
@@ -461,8 +461,10 @@ InvestmentTracker/
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/?status&type&location&currency&custodian&search&sort&order&page&limit` | Lista paginada |
+| POST | `/` | Crea instrumento manualmente; opcionalmente crea MonthlyPosition con balance_usd calculado |
 | GET | `/{id}` | Detalle |
 | PUT | `/{id}` | Actualiza campos |
+| POST | `/{id}/rescate-total` | Crea transacción rescate y cierra instrumento (solo renta_fija activo) |
 
 ### `/api/import`
 | Método | Ruta | Descripción |
@@ -540,7 +542,7 @@ Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL, c
 
 ### History (`/history`)
 Matriz Histórico: tabla instrumento × período (vista Mensual o Anual). Toggle BRL/USD, selector de año,
-filtros por custodio/tipo/mercado con limpiar filtros, scroll horizontal.
+filtros por instrumento (texto, client-side), custodio, tipo y mercado con limpiar filtros, scroll horizontal.
 Vista Mensual: 12 columnas (Ene–Dic) para el año seleccionado.
 Vista Anual: hasta 10 columnas (últimos años con datos, valor de diciembre o último mes disponible).
 Comportamiento: filas ordenadas por mercado (brasil→exterior) y tipo (TYPE_ORDER); celdas en verde si
@@ -702,7 +704,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Dashboard con KPIs, evolución, distribución, benchmarks (CDI/IPCA), top/bottom, vencimientos
 - [x] Posiciones: filtros, paginación, sort (default: brasil→exterior→tipo→nombre), export CSV
 - [x] Historial por instrumento: gráficos, CAGR, drawdown, volatility, comparación multi
-- [x] Histórico matriz mensual/anual: instrumento × período, filtros custodio/tipo/mercado, BRL/USD toggle
+- [x] Histórico matriz mensual/anual: instrumento × período, filtros instrumento/custodio/tipo/mercado, BRL/USD toggle
 - [x] Resumen anual: tabla + gráfico apilado
 - [x] Proventos: tabla histórica (año actual desde provento_items + forecast), gráfico barras apiladas (Pagado + Previsto), grilla editable, previsión
 - [x] Importador Fixed Income (renta fija): wizard 3 pasos, diff preview, cross-custodio, mapeo manual
@@ -723,6 +725,8 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Copiar posiciones del mes anterior al actual de forma segura para instrumentos activos
 - [x] Sincronización automática de pre-cálculos del PortfolioSnapshot al editar históricos (snapshot_sync)
 - [x] Ticker de renta variable en dashboard (yfinance, cache 5 min, animación marquee, hover pause)
+- [x] Rescate total de instrumento (ícono en tabla de posiciones para renta fija)
+- [x] Creación manual de instrumento con saldo inicial opcional (modal en Settings → Catálogo)
 
 ---
 

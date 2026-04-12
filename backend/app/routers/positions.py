@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from app.models.portfolio_snapshot import PortfolioSnapshot
-from app.services.snapshot_sync import sync_snapshot_for_date, sync_all_snapshots
+from app.services.snapshot_sync import sync_snapshot_for_date, sync_all_snapshots, resync_portfolio_totals
 
 TYPE_ORDER = ["accion", "fii", "renta_fija", "fundo", "previdencia", "prestamos", "saving", "fgts", "outro"]
 
@@ -437,6 +437,9 @@ def update_equities_prices(
         })
 
     db.commit()
+    if updated > 0:
+        resync_portfolio_totals(db)
+        db.commit()
     return {"updated": updated, "skipped": len(errors), "errors": errors, "prices": prices_out}
 
 
