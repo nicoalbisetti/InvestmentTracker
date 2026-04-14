@@ -56,3 +56,18 @@ Al terminar cualquier feature o conjunto de cambios, siempre actualizar:
        mv specs/pending/prompt_<nombre>.txt specs/done/prompt_<nombre>.txt
    - Hacer esto solo cuando todos los criterios de aceptación del spec estén cumplidos.
    - Si el feature quedó incompleto en la sesión, dejar el spec en `specs/pending/`.
+
+5. Enviar mensaje de cierre al canal de Slack #claudio-coding (channel_id: C0AMM733V1Q)
+usando slack_send_message.
+Si el feature se completó exitosamente:
+✅ <Nombre del feature> completado y pusheado.
+Resumen:
+• Criterios de aceptación: todos ✓
+Listo para revisión.
+Si la sesión terminó con el feature incompleto:
+⚠️ <Nombre del feature> — sesión terminada, incompleto.
+Completado:
+• <lista de lo que sí se implementó>
+Pendiente:
+• <lista de lo que falta>
+Spec sigue en specs/pending/
