@@ -12,6 +12,7 @@ from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.services.snapshot_sync import sync_snapshot_for_date, sync_all_snapshots, resync_portfolio_totals
+from app.services.return_calculator import compute_period_return, PRICE_TYPES
 
 TYPE_ORDER = ["accion", "fii", "renta_fija", "fundo", "previdencia", "prestamos", "saving", "fgts", "outro"]
 
@@ -219,6 +220,7 @@ def get_positions(
             "return_3m": inst.return_3m,
             "return_6m": inst.return_6m,
             "return_12m": inst.return_12m,
+            "return_source": inst.return_source,
             "rank_1m": inst.rank_1m,
             "maturity_date": inst.maturity_date.isoformat() if inst.maturity_date else None,
             "in_liquidation": inst.in_liquidation or False,
@@ -671,39 +673,28 @@ def recalculate_stats(db: Session = Depends(get_db)):
     total = sum(bal for _, bal, _, _ in rows if bal)
     total_usd = sum(usd for _, _, usd, _ in rows if usd)
 
-    def get_balance_n_months_ago(inst_id: int, latest_date: date, n: int) -> Optional[float]:
-        target = latest_date - relativedelta(months=n)
-        pos = (
-            db.query(MonthlyPosition)
-            .filter(
-                MonthlyPosition.instrument_id == inst_id,
-                MonthlyPosition.date <= target,
-                MonthlyPosition.balance_brl.isnot(None),
-                MonthlyPosition.balance_brl > 0,
-            )
-            .order_by(MonthlyPosition.date.desc())
-            .first()
-        )
-        return pos.balance_brl if pos else None
+    def _ret(n: int, iid: int, itype: str, ldate: date) -> Optional[float]:
+        return compute_period_return(iid, itype, ldate, n, db)
 
     stats = {}
     for inst, current_bal, _, latest_date in rows:
         if not current_bal or not latest_date:
             continue
 
-        def _ret(n: int, cbal=current_bal, iid=inst.id, ldate=latest_date) -> Optional[float]:
-            prev = get_balance_n_months_ago(iid, ldate, n)
-            if prev and prev != 0:
-                return (cbal - prev) / prev
-            return None
+        r1m = _ret(1, inst.id, inst.type, latest_date)
+        if r1m is not None:
+            src = "price" if inst.type in PRICE_TYPES else "balance"
+        else:
+            src = "none"
 
         stats[inst.id] = {
             "current_balance_brl": current_bal,
             "portfolio_pct": current_bal / total if total else None,
-            "return_1m": _ret(1),
-            "return_3m": _ret(3),
-            "return_6m": _ret(6),
-            "return_12m": _ret(12),
+            "return_1m": r1m,
+            "return_3m": _ret(3, inst.id, inst.type, latest_date),
+            "return_6m": _ret(6, inst.id, inst.type, latest_date),
+            "return_12m": _ret(12, inst.id, inst.type, latest_date),
+            "return_source": src,
         }
 
     # Compute ranks (1 = best return, only among instruments with that return available)
@@ -730,6 +721,7 @@ def recalculate_stats(db: Session = Depends(get_db)):
         inst.return_3m = s.get("return_3m")
         inst.return_6m = s.get("return_6m")
         inst.return_12m = s.get("return_12m")
+        inst.return_source = s.get("return_source")
         inst.rank_1m = s.get("rank_1m")
         inst.rank_3m = s.get("rank_3m")
         inst.rank_6m = s.get("rank_6m")

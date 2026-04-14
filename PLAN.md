@@ -231,6 +231,7 @@ GET  /api/import/history              # Historial de importaciones
 - [x] Ticker de renta variable en dashboard — banda animada con precio y variación del día vía yfinance, cache 5 min
 - [x] Rescate total de instrumento — ícono en tabla de posiciones para renta fija activa, modal confirmación, endpoint atómico
 - [x] Creación manual de instrumento — botón + Nuevo Instrumento en Settings, modal formulario completo, saldo inicial opcional con cálculo automático de balance_usd
+- [x] Retornos por período sin campos legacy — compute_period_return() con rama price (accion/fii) y balance (Modified Dietz para el resto), return_source en Instrument, tooltips en Positions
 
 ### Fase 4 — Frontend resto de paginas
 14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)

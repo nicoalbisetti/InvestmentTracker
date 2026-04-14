@@ -63,6 +63,21 @@ def _migrate_provento_items(eng):
             conn.commit()
 
 
+def _migrate_return_source(eng):
+    """Add return_source column to instruments if it doesn't exist."""
+    from sqlalchemy import text
+    with eng.connect() as conn:
+        row = conn.execute(text(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='instruments'"
+        )).fetchone()
+        if row and 'return_source' not in row[0]:
+            try:
+                conn.execute(text("ALTER TABLE instruments ADD COLUMN return_source TEXT"))
+                conn.commit()
+            except Exception:
+                pass
+
+
 def create_tables():
     # Import all models so Base knows about them
     from app.models import (  # noqa: F401

@@ -1,0 +1,464 @@
+=============================================================================
+INVESTMENT TRACKER — CÁLCULO DE RETORNOS POR PERÍODO
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md desde el repositorio antes de comenzar. No crear TASKS.md.
+En cambio, crear una lista en ClickUp según las instrucciones del Paso 0.
+A medida que completes cada tarea, actualizar el estado en ClickUp.
+No iniciar el desarrollo hasta tener el Paso 0 completado.
+
+
+=============================================================================
+PASO 0 — CLICKUP
+=============================================================================
+
+Crear una lista nueva en ClickUp dentro del folder id=90177874339:
+  Nombre: "Retornos por período"
+
+Crear las siguientes tareas dentro de esa lista y registrar sus IDs:
+
+  TASK-A  Implementar compute_period_return() en recalculate_stats
+  TASK-B  Implementar persistencia de gain / gain_pct en equity_recalculate
+  TASK-C  Agregar campo return_source a Instrument (migración)
+  TASK-D  Actualizar endpoint recalculate-stats para usar nueva lógica
+  TASK-E  Agregar tooltip en columnas de retorno en Positions.tsx
+  TASK-F  Actualizar PLAN.md y CONTEXT.md
+  TASK-G  Commit y verificación final
+
+Marcar cada tarea como completada (status "complete") al terminarla usando
+clickup_update_task con el task_id correspondiente.
+
+
+=============================================================================
+1. RESUMEN DE LA FUNCIONALIDAD
+=============================================================================
+
+Reemplazar el cálculo de retornos por período (return_1m, return_3m,
+return_6m, return_12m) en el endpoint POST /api/positions/recalculate-stats
+por una lógica que no dependa de campos legacy del Excel (gain_pct,
+applications, redemptions, previous_balance, calculated_balance).
+
+El nuevo cálculo usa exclusivamente los campos que los importers modernos
+sí escriben: balance_brl, unit_price, quantity.
+
+La fórmula varía según el tipo de instrumento:
+
+  - accion / fii:
+      Retorno de precio puro: (unit_price_actual - unit_price_N_meses_atrás)
+                              / unit_price_N_meses_atrás
+      Esto mide el rendimiento del activo sin considerar compras/ventas.
+
+  - renta_fija / fundo / previdencia / saving / fgts / outro / exterior:
+      Variación de balance ajustada por flujos estimados.
+      Ver sección 3 para la lógica exacta.
+
+Adicionalmente, equity_recalculate.py debe empezar a calcular y persistir
+gain y gain_pct en MonthlyPosition al recalcular posiciones de acciones/FIIs,
+para que en el futuro el cálculo de retornos pueda encadenar esos valores.
+
+
+=============================================================================
+2. CONTEXTO DEL SISTEMA — CAMPOS DISPONIBLES POR TIPO
+=============================================================================
+
+Campos que los importers MODERNOS escriben en MonthlyPosition
+(estos son los únicos que se puede usar en la nueva lógica):
+
+  Campo            Escrito por
+  ──────────────── ─────────────────────────────────────────────────
+  balance_brl      Todos los importers (renta fija, equity, XP Intl)
+  balance_usd      Renta fija XP/Santander, XP International
+  usd_rate         Renta fija XP/Santander, update-usd-rate endpoint
+  unit_price       Renta fija XP/Santander (precio MTM o curva),
+                   update-equities-prices (yfinance para B3),
+                   XP International
+  quantity         Renta fija XP/Santander, equity_recalculate
+  avg_price        equity_recalculate (precio promedio de compra)
+  capital_invested Renta fija XP/Santander (solo Tesouro Direto)
+  custodian_override  Renta fija XP/Santander (cross-custodio)
+
+Campos legacy del Excel que NO deben usarse en la nueva lógica:
+
+  gain, gain_pct, applications, redemptions,
+  previous_balance, calculated_balance, proventos
+
+
+=============================================================================
+3. LÓGICA DE CÁLCULO POR TIPO — compute_period_return()
+=============================================================================
+
+Crear la función helper compute_period_return() dentro de
+backend/app/routers/positions.py (o en un módulo nuevo
+backend/app/services/return_calculator.py si resulta más limpio).
+
+Firma:
+  def compute_period_return(
+      instrument_id: int,
+      instrument_type: str,
+      latest_date: date,
+      n_months: int,
+      db: Session,
+  ) -> Optional[float]:
+
+Comportamiento según tipo:
+
+--- 3.1 Tipos: accion, fii ---
+
+  Objetivo: retorno de precio puro, sin interferencia de compras/ventas.
+
+  1. Obtener mp_actual: el MonthlyPosition del instrumento con
+     date == latest_date.
+     Si mp_actual.unit_price es None → retornar None.
+
+  2. Calcular target_date = latest_date - relativedelta(months=n_months).
+
+  3. Obtener mp_prev: el MonthlyPosition del instrumento con
+     date <= target_date, balance_brl > 0, unit_price IS NOT NULL,
+     ORDER BY date DESC, LIMIT 1.
+     Si no existe → retornar None.
+
+  4. Si la diferencia entre mp_prev.date y target_date es mayor a
+     45 días → retornar None (el período real difiere demasiado del nominal).
+
+  5. Retornar (mp_actual.unit_price - mp_prev.unit_price) / mp_prev.unit_price
+
+  NOTA: No usar balance_brl para acciones/FIIs porque ese campo incluye
+  el efecto de compras y ventas (balance = quantity × unit_price).
+
+
+--- 3.2 Tipos: renta_fija, fundo, previdencia, saving, fgts, outro, exterior ---
+
+  Objetivo: aproximar el retorno del activo excluyendo flujos de capital.
+  Para renta fija sin rescates parciales esto es exacto. Para fondos con
+  movimientos frecuentes es una aproximación.
+
+  Estrategia: Modified Dietz simplificado usando solo balance_brl.
+  Asumimos que si no hay campos de flujo disponibles (legacy vacíos),
+  el único escenario donde la variación de balance ≠ retorno es cuando
+  hay una aplicación o rescate registrada en Transaction.
+
+  1. Obtener mp_actual con date == latest_date.
+     Si mp_actual.balance_brl is None o <= 0 → retornar None.
+
+  2. Calcular target_date = latest_date - relativedelta(months=n_months).
+
+  3. Obtener mp_prev: date <= target_date, balance_brl > 0,
+     ORDER BY date DESC, LIMIT 1.
+     Si no existe → retornar None.
+
+  4. Si la diferencia entre mp_prev.date y target_date es mayor a
+     45 días → retornar None.
+
+  5. Consultar flujos netos del período desde la tabla transactions:
+       net_flow = SUM(amount_brl) WHERE
+         instrument_id = instrument_id
+         AND date > mp_prev.date
+         AND date <= latest_date
+         AND type IN ('aplicacion', 'rescate')
+       Para 'aplicacion': sumar positivo.
+       Para 'rescate': sumar negativo.
+
+     Si no hay registros en transactions para este instrumento → net_flow = 0.
+
+  6. Calcular base ajustada:
+       adjusted_base = mp_prev.balance_brl + (net_flow * 0.5)
+     Si adjusted_base <= 0 → retornar None.
+
+  7. Retornar:
+       (mp_actual.balance_brl - mp_prev.balance_brl - net_flow) / adjusted_base
+
+
+--- 3.3 Período de N meses: criterio de gap máximo ---
+
+El criterio de 45 días del punto 4 en ambas ramas aplica así:
+
+  allowed_gap = 45  # días
+  actual_gap = abs((mp_prev.date - target_date).days)
+  if actual_gap > allowed_gap:
+      return None
+
+Esto evita que un instrumento con dato de hace 8 meses aparezca con un
+return_3m calculado silenciosamente sobre 8 meses.
+
+Nota: para períodos de 12 meses el gap máximo puede ser hasta 45 días,
+lo que cubre meses que llegan tarde por el ciclo de importación.
+
+
+=============================================================================
+4. PERSISTENCIA DE gain / gain_pct EN equity_recalculate.py
+=============================================================================
+
+Modificar backend/app/services/equity_recalculate.py en la función
+recalculate_equity_positions() para calcular y persistir gain y gain_pct
+en cada MonthlyPosition que procesa.
+
+Lógica a agregar dentro del loop por mes, DESPUÉS de actualizar
+mp.quantity, mp.avg_price y mp.balance_brl:
+
+  # Calcular gain mensual y gain_pct
+  prev_mp = MonthlyPosition con
+    instrument_id == instrument_id
+    AND date == mp.date - relativedelta(months=1)
+    (puede ser None si es el primer mes)
+
+  if prev_mp and prev_mp.balance_brl and prev_mp.balance_brl > 0:
+      # Flujos de trades del mes (compras son salidas de caja, ventas entradas)
+      trades_this_month = lista de trades ya computada en el loop
+      net_trade_flow = sum(
+          t.quantity * t.price if t.trade_type == "compra" else -(t.quantity * t.price)
+          for t in trades_this_month
+      )
+      # gain = variación de balance descontando el flujo neto de trades
+      mp.gain = (mp.balance_brl or 0) - (prev_mp.balance_brl or 0) - net_trade_flow
+      adjusted_base = (prev_mp.balance_brl or 0) + net_trade_flow * 0.5
+      if adjusted_base > 0:
+          mp.gain_pct = mp.gain / adjusted_base
+      else:
+          mp.gain_pct = None
+  else:
+      mp.gain = None
+      mp.gain_pct = None
+
+IMPORTANTE: Este cambio hace que gain y gain_pct empiecen a ser válidos
+para acciones/FIIs a partir de la próxima importación o recalculo.
+Los datos históricos anteriores a este cambio seguirán con gain=None,
+lo cual es correcto (mejor null que un número incorrecto).
+
+
+=============================================================================
+5. CAMBIO EN recalculate_stats
+=============================================================================
+
+Modificar el endpoint POST /api/positions/recalculate-stats en
+backend/app/routers/positions.py.
+
+Reemplazar la función interna _ret() y get_balance_n_months_ago() por
+llamadas a la nueva compute_period_return().
+
+La función actual (a reemplazar):
+
+  def get_balance_n_months_ago(inst_id, latest_date, n):
+      ...balance-based lookup...
+
+  def _ret(n, cbal, iid, ldate):
+      prev = get_balance_n_months_ago(iid, ldate, n)
+      if prev and prev != 0:
+          return (cbal - prev) / prev
+      return None
+
+Reemplazar por:
+
+  def _ret(n: int, iid: int, itype: str, ldate: date) -> Optional[float]:
+      return compute_period_return(iid, itype, ldate, n, db)
+
+Y en el loop principal:
+
+  for inst, current_bal, _, latest_date in rows:
+      ...
+      stats[inst.id] = {
+          "current_balance_brl": current_bal,
+          "portfolio_pct": current_bal / total if total else None,
+          "return_1m":  _ret(1,  inst.id, inst.type, latest_date),
+          "return_3m":  _ret(3,  inst.id, inst.type, latest_date),
+          "return_6m":  _ret(6,  inst.id, inst.type, latest_date),
+          "return_12m": _ret(12, inst.id, inst.type, latest_date),
+      }
+
+
+=============================================================================
+6. CAMPO return_source EN Instrument (migración)
+=============================================================================
+
+Agregar el campo return_source a la tabla instruments para indicar qué
+método se usó en el último recalculate-stats. Esto permite que la UI
+muestre un tooltip informativo.
+
+Migración: agregar columna con ALTER TABLE (no requiere recrear la tabla).
+
+  ALTER TABLE instruments ADD COLUMN return_source TEXT;
+
+Valores posibles:
+  "price"      — calculado desde unit_price (accion/fii)
+  "balance"    — calculado desde balance_brl con ajuste de flujos
+  "none"       — no se pudo calcular (unit_price o balance no disponibles)
+
+Al ejecutar recalculate-stats, setear return_source según la rama que
+se ejecutó en compute_period_return() para return_1m (período más corto,
+más representativo).
+
+Si return_1m resultó None: return_source = "none"
+Si se usó la rama unit_price: return_source = "price"
+Si se usó la rama balance: return_source = "balance"
+
+Agregar return_source al modelo Instrument en
+backend/app/models/instrument.py y al schema de respuesta de positions.
+
+La migración debe ejecutarse en el startup de la app igual que otras
+migraciones existentes (ver patrón _migrate_provento_items en main.py o
+equivalente). NO crear un script de migración separado.
+
+
+=============================================================================
+7. CAMBIOS EN EL FRONTEND — Positions.tsx
+=============================================================================
+
+Solo cambio visual: agregar un tooltip en las columnas de retorno
+(1M%, 3M%, 6M%, 12M%) que explique el método de cálculo según return_source.
+
+Si return_source == "price":
+  Tooltip: "Retorno calculado sobre precio unitario (excluye compras/ventas)"
+
+Si return_source == "balance":
+  Tooltip: "Retorno estimado sobre saldo (ajustado por transacciones registradas)"
+
+Si return_source == "none" o null:
+  No mostrar tooltip, solo mostrar "—" en la celda.
+
+El tooltip puede ser un title HTML simple o el componente Tooltip de
+shadcn/ui si ya está en uso en esa página.
+
+NO cambiar el nombre de las columnas ni el formato de los valores.
+NO modificar ninguna otra página.
+
+
+=============================================================================
+8. CASOS BORDE Y VALIDACIONES
+=============================================================================
+
+--- 8.1 Instrumento sin unit_price en ningún mes (accion/fii reciente) ---
+  compute_period_return devuelve None para todos los períodos.
+  return_source = "none".
+  Las celdas muestran "—". Correcto — es mejor null que inventar un número.
+
+--- 8.2 Renta fija sin movimientos en Transaction ---
+  net_flow = 0. El cálculo se reduce a:
+    (balance_actual - balance_anterior) / balance_anterior
+  Que para renta fija sin rescates parciales es el retorno real.
+
+--- 8.3 Instrumento con rescate total en el período ---
+  mp_actual.balance_brl = 0 o instrument.status = "cerrado".
+  El instrumento no aparece en el query de recalculate-stats
+  (ya filtra balance > 0). No afecta el cálculo.
+
+--- 8.4 Instrumento nuevo (menos de N meses de historia) ---
+  mp_prev no existe para períodos largos → None para esos períodos.
+  Por ejemplo: un instrumento de 2 meses tiene return_1m pero no
+  return_3m, return_6m ni return_12m. Correcto.
+
+--- 8.5 Instrumento con gap > 45 días ---
+  Devuelve None explícitamente en lugar de silenciosamente calcular
+  sobre un período diferente al nominal. La UI muestra "—".
+
+--- 8.6 XP International (USD) ---
+  Los instrumentos de XP International tienen unit_price en USD y
+  balance_brl calculado con usd_rate.
+  Para tipo "accion" (ETFs) → se usa la rama unit_price.
+  El retorno resultante es en USD (variación de precio en USD).
+  NOTA: Esto es consistente porque unit_price para XP Intl está en USD.
+  Dejar así por ahora. Una conversión a BRL requeriría usd_rate histórico
+  mes a mes, lo cual es una mejora futura.
+
+--- 8.7 Instrumentos con custodian_override (cross-custodio) ---
+  Pueden existir dos MonthlyPosition para el mismo instrumento en el
+  mismo mes (mismo instrument_id, distinto custodian_override).
+  Para el cálculo de retorno: usar la suma de ambas para balance, o
+  si es por unit_price usar cualquiera (el precio es el mismo).
+
+  Simplificación aceptable: la query de recalculate-stats ya agrupa
+  por instrument_id via _latest_positions_subquery. No se necesita
+  cambio aquí — el retorno se calcula al nivel del instrument, no
+  del MonthlyPosition individual.
+
+
+=============================================================================
+9. ARCHIVOS A MODIFICAR
+=============================================================================
+
+MODIFICAR:
+  backend/app/routers/positions.py
+    - Agregar función compute_period_return() (o importarla del servicio)
+    - Reemplazar _ret() y get_balance_n_months_ago() en recalculate_stats
+    - Setear return_source al calcular stats
+
+  backend/app/services/equity_recalculate.py
+    - Agregar cálculo de gain y gain_pct en el loop de recalculo
+
+  backend/app/models/instrument.py
+    - Agregar campo return_source: Column(String, nullable=True)
+
+  backend/app/main.py (o donde estén las migraciones de startup)
+    - Agregar ALTER TABLE instruments ADD COLUMN return_source TEXT
+      con el patrón try/except ya existente
+
+  frontend/src/pages/Positions.tsx
+    - Agregar tooltip en columnas de retorno según return_source
+
+OPCIONALMENTE CREAR (si se prefiere separar la lógica):
+  backend/app/services/return_calculator.py
+    - Contiene compute_period_return()
+    - Si se crea, importar desde positions.py
+
+
+=============================================================================
+10. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+1. POST /api/positions/recalculate-stats completa sin errores con la BD
+   actual.
+
+2. Para instrumentos de tipo accion/fii con unit_price disponible:
+   return_1m != None Y return_source == "price".
+
+3. Para acciones/FIIs con unit_price disponible solo en el mes actual pero
+   no N meses atrás: return_Nm == None para ese período específico.
+
+4. Para instrumentos de renta_fija con >= 2 meses de historia:
+   return_1m != None Y return_source == "balance".
+
+5. Para un instrumento de renta fija que tuvo una Transaction de tipo
+   "aplicacion" en el período: el return calculado es diferente al que
+   se obtendría sin ajustar por net_flow (verificar manualmente con un
+   ejemplo concreto en la BD).
+
+6. Para un instrumento nuevo con 1 mes de historia:
+   return_1m != None, return_3m == None, return_6m == None,
+   return_12m == None.
+
+7. En Positions.tsx, al hacer hover sobre una celda de retorno de una
+   acción, se muestra el tooltip "Retorno calculado sobre precio unitario
+   (excluye compras/ventas)".
+
+8. En Positions.tsx, al hacer hover sobre una celda de retorno de renta
+   fija, se muestra el tooltip sobre método de balance.
+
+9. equity_recalculate: después de crear/editar un EquityTrade, las
+   MonthlyPosition afectadas tienen gain y gain_pct != None (si hay mes
+   anterior disponible).
+
+10. No hay regresiones en los otros endpoints de /api/positions.
+
+
+=============================================================================
+PASO FINAL
+=============================================================================
+
+Al terminar todos los cambios:
+
+1. Actualizar PLAN.md: agregar "Retornos por período (sin campos legacy)"
+   en la lista de features implementados bajo Fase 7.
+
+2. Actualizar CONTEXT.md: documentar compute_period_return() en la sección
+   de lógica de negocio, y agregar return_source al esquema de Instrument.
+
+3. Marcar todas las tareas de ClickUp como completadas.
+
+4. Hacer commit con mensaje:
+   "feat: retornos por período sin campos legacy (price/balance según tipo)"
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

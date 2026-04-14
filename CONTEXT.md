@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 10 Abr 2026 (actualizado: Filtro por instrumento en histórico).
+> Refleja el estado REAL del código al 14 Abr 2026 (actualizado: Retornos por período sin campos legacy).
 
 ---
 
@@ -68,7 +68,7 @@ InvestmentTracker/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                     # FastAPI app, routers, startup migrations
-│   │   ├── database.py                 # Engines, sessions, _migrate_provento_items()
+│   │   ├── database.py                 # Engines, sessions, _migrate_provento_items(), _migrate_return_source()
 │   │   ├── models/
 │   │   │   ├── instrument.py
 │   │   │   ├── monthly_position.py
@@ -104,6 +104,7 @@ InvestmentTracker/
 │   │   │   ├── proventos_importer.py
 │   │   │   ├── international_importer.py
 │   │   │   ├── equity_recalculate.py
+│   │   │   ├── return_calculator.py
 │   │   │   └── performance.py
 │   │   └── schemas/
 │   │       ├── common.py
@@ -201,6 +202,7 @@ InvestmentTracker/
 | return_1m … return_12m | Float | SI |
 | current_balance_brl | Float | SI — cache del balance actual |
 | portfolio_pct | Float | SI |
+| return_source | String | SI — "price" \| "balance" \| "none" (método usado en último recalculate-stats) |
 | created_at | DateTime | NO |
 
 **Tipos válidos:** `accion`, `fii`, `renta_fija`, `fundo`, `previdencia`, `prestamos`, `saving`, `fgts`, `outro`
@@ -417,7 +419,7 @@ InvestmentTracker/
 | POST | `/update-equities-prices?month=YYYY-MM` | Actualiza precios B3 via yfinance |
 | POST | `/update-usd-rate?month=YYYY-MM` | Actualiza cotización USD/BRL |
 | POST | `/copy-previous-month` | Copia balances/quantities de los instrumentos activos al mes actual |
-| POST | `/recalculate-stats` | Recalcula current_balance_brl, portfolio_pct, rankings |
+| POST | `/recalculate-stats` | Recalcula current_balance_brl, portfolio_pct, return_1m/3m/6m/12m (vía compute_period_return), return_source, rankings |
 | POST | `/ensure-month` | Crea MonthlyPosition vacía para instrument_id+month si no existe; retorna mp_id |
 
 ### `/api/history`
@@ -641,6 +643,17 @@ precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalcula
 - `compute_diff(parsed_data, db)` → DiffReport con status NEW/DUPLICATE/CONFLICT/NO_MATCH/AMBIGUOUS_MATCH
 - `apply_import(diff_report, force_duplicates, skip_indices, manual_mappings, period_label, db)` → ImportResult
 - Detección de duplicados: en-archivo (mismo instrumento+fecha+tipo+monto) y en-DB
+
+### `services/return_calculator.py`
+- `compute_period_return(instrument_id, instrument_type, latest_date, n_months, db)` — calcula retorno del instrumento en los últimos N meses.
+  - **Rama price** (`accion`, `fii`): `(unit_price_actual - unit_price_N_meses_atrás) / unit_price_N_meses_atrás`. Mide retorno del activo sin interferencia de compras/ventas.
+  - **Rama balance** (resto): Modified Dietz simplificado con flujos netos de `transactions` (tipo `aplicacion`/`rescate`). Fórmula: `(balance_actual - balance_anterior - net_flow) / (balance_anterior + net_flow × 0.5)`.
+  - Gap máximo de 45 días entre la fecha de referencia histórica y `target_date`; si se excede retorna `None`.
+- Usado por `POST /api/positions/recalculate-stats`.
+- `PRICE_TYPES = {"accion", "fii"}` — constante exportada para determinar `return_source`.
+
+### `services/equity_recalculate.py`
+- Calcula y persiste `gain` y `gain_pct` en `MonthlyPosition` para acciones/FIIs con Modified Dietz usando trades del mes y balance del mes anterior.
 
 ### `services/importer.py`
 - Importa el Excel genérico (Inversiones.xlsx) con 6 hojas

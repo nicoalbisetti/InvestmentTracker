@@ -524,13 +524,20 @@ export default function Positions() {
                           )}
                         </td>
                         <td className="px-3 py-2.5 text-gray-600 dark:text-gray-400">{fmtPct(row.portfolio_pct)}</td>
-                        {showReturns && <>
-                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_1m)}`}>{fmtPct(row.return_1m)}</td>
-                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_3m)}`}>{fmtPct(row.return_3m)}</td>
-                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_6m)}`}>{fmtPct(row.return_6m)}</td>
-                          <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_12m)}`}>{fmtPct(row.return_12m)}</td>
-                          <td className="px-3 py-2.5 text-center text-gray-500">{row.rank_1m ?? '—'}</td>
-                        </>}
+                        {showReturns && (() => {
+                          const retTooltip = row.return_source === 'price'
+                            ? 'Retorno calculado sobre precio unitario (excluye compras/ventas)'
+                            : row.return_source === 'balance'
+                            ? 'Retorno estimado sobre saldo (ajustado por transacciones registradas)'
+                            : undefined;
+                          return <>
+                            <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_1m)}`} title={retTooltip}>{fmtPct(row.return_1m)}</td>
+                            <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_3m)}`} title={retTooltip}>{fmtPct(row.return_3m)}</td>
+                            <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_6m)}`} title={retTooltip}>{fmtPct(row.return_6m)}</td>
+                            <td className={`px-3 py-2.5 font-mono ${colorReturn(row.return_12m)}`} title={retTooltip}>{fmtPct(row.return_12m)}</td>
+                            <td className="px-3 py-2.5 text-center text-gray-500">{row.rank_1m ?? '—'}</td>
+                          </>;
+                        })()}
                         <td className="px-3 py-2 font-mono text-gray-600 dark:text-gray-400 cursor-pointer group"
                           onClick={async () => {
                             let mpId = row.mp_id;

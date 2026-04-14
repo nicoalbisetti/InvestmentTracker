@@ -35,6 +35,7 @@ class Instrument(Base):
     return_12m = Column(Float, nullable=True)
     current_balance_brl = Column(Float, nullable=True)
     portfolio_pct = Column(Float, nullable=True)
+    return_source = Column(String, nullable=True)  # "price", "balance", or "none"
 
     positions = relationship("MonthlyPosition", back_populates="instrument", cascade="all, delete-orphan")
     proventos = relationship("Provento", back_populates="instrument", cascade="all, delete-orphan")
