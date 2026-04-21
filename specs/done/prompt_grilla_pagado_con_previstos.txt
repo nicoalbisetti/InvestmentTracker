@@ -1,0 +1,253 @@
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+==========================================
+Lee este archivo completo antes de tocar cualquier código.
+Sigue los pasos en orden. No adelantes pasos.
+Usa las herramientas MCP de ClickUp para gestión de tareas.
+workspace_id: 90171028210
+folder_id InvestmentTracker: 90177874339
+
+
+=============================================================================
+FEATURE: Grilla de Pagado — Mostrar y sumar previstos no pagados
+=============================================================================
+
+## Objetivo
+
+En la tab "Grilla pagado" de la página Proventos (`/proventos`), cuando una
+celda (instrumento × mes) NO tiene pago registrado en `provento_items` pero SÍ
+tiene una previsión en `provento_forecast`, mostrar ese valor previsto en un
+color diferente (amarillo/ámbar), incluirlo en los totales de columna y fila,
+y pre-popularlo en el input de edición cuando el usuario hace click.
+
+La lógica es: si hay pagado → muestra pagado (verde, como hoy).
+              si no hay pagado pero hay previsto → muestra previsto (ámbar).
+              si no hay ninguno → punto gris (como hoy).
+
+Esta feature no modifica ningún endpoint existente más allá de ampliar el
+response del GET /api/proventos/grid para incluir datos de forecast.
+
+
+=============================================================================
+PASO 0 — Gestión de tareas (ANTES de escribir código)
+=============================================================================
+
+a) Crear TASKS.md en la raíz del proyecto con los checkboxes de todas las tareas
+   listadas más abajo.
+
+b) Crear una nueva lista en ClickUp dentro del folder InvestmentTracker:
+   - Usar `clickup_create_list_in_folder` con folder_id=90177874339
+   - Nombre de la lista: "Grilla Pagado con Previstos"
+
+c) Crear una tarea en ClickUp por cada item del TASKS.md.
+
+d) Recién después iniciar el desarrollo; marcar tareas como completadas
+   a medida que avanza.
+
+
+=============================================================================
+PASO 1 — Backend: ampliar GET /api/proventos/grid
+=============================================================================
+
+### Archivo: backend/app/routers/proventos.py — función get_proventos_grid()
+
+**Cambio requerido:** agregar datos de `provento_forecast` al response por celda.
+
+La función actual devuelve por instrumento:
+  {
+    "id": ...,
+    "name": ...,
+    "type": ...,
+    "months": { 1: <paid_amount|null>, 2: ..., ... },
+    "total": <suma de meses pagados>,
+    ...
+  }
+
+Debe pasar a devolver también `forecast_months`:
+  {
+    "id": ...,
+    "name": ...,
+    "type": ...,
+    "months": { 1: <paid_amount|null>, ... },       ← sin cambios
+    "forecast_months": { 1: <forecast|null>, ... }, ← NUEVO
+    "total": <suma de meses pagados + meses solo previstos>,  ← CAMBIA
+    ...
+  }
+
+**Lógica para forecast_months:**
+- Cargar todos los ProventoForecast para los instrumentos y el año objetivo
+- Para cada instrumento × mes: si months[m] es null (no hay pago) Y hay forecast
+  para ese instrumento en ese mes → forecast_months[m] = forecast.amount
+- Si hay pago registrado (months[m] > 0) → forecast_months[m] = null (no aplica)
+- Es decir: forecast_months solo tiene valor donde months NO tiene valor
+
+**Lógica para total (fila):**
+- total = sum(paid para meses con pago) + sum(forecast para meses solo previstos)
+- Es el mismo criterio "pagado si existe, si no previsto"
+
+**Lógica para month_totals (totales de columna):**
+- month_totals[m] = sum de (paid si existe, else forecast) para todos los instrumentos
+- Reemplaza el cálculo actual que solo sumaba pagados
+
+**Lógica para grand_total:**
+- sum(month_totals.values())
+
+**Patrón de queries a seguir** (ver /api/proventos/monthly como referencia):
+1. Cargar paid items del año → paid_map: {(instrument_id, month): amount}
+2. Determinar qué instrumentos tienen pago por mes → paid_insts: {month: set(inst_id)}
+3. Cargar forecast del año → forecast_map: {(instrument_id, month): amount}
+4. Al construir la respuesta por instrumento:
+   - months[m] = paid_map.get((inst.id, m))
+   - forecast_months[m] = forecast_map.get((inst.id, m)) if months[m] is None else None
+
+**Sin cambios de schema de DB ni nuevos endpoints.**
+
+
+=============================================================================
+PASO 2 — Frontend: Proventos.tsx — componente ProventosGrid
+=============================================================================
+
+### Archivo: frontend/src/pages/Proventos.tsx
+
+**Cambios en el estado de edición:**
+
+Actualmente:
+  setEditing({ instId: row.id, month: m, value: val != null ? String(val) : '' })
+
+Debe pre-popular con el forecast si no hay pago:
+  const paid = row.months[m];
+  const forecast = row.forecast_months?.[m];
+  const initialValue = paid != null
+    ? String(paid)
+    : forecast != null
+      ? String(forecast)
+      : '';
+  setEditing({ instId: row.id, month: m, value: initialValue })
+
+**Cambios en el estilo visual de celdas:**
+
+Actualmente hay dos estados: valor (verde) o vacío (gris).
+Debe haber tres estados:
+
+1. Pagado (months[m] != null):
+   - Valor: fmtBRL(row.months[m])
+   - Color: verde (clase actual: text-emerald-600 dark:text-emerald-400)
+
+2. Solo previsto (months[m] == null && forecast_months[m] != null):
+   - Valor: fmtBRL(row.forecast_months[m])
+   - Color: ámbar (text-amber-500 dark:text-amber-400)
+   - Agregar un indicador visual sutil que distinga que es previsto, no pagado.
+     Opción sugerida: texto en ámbar con estilo italic o con un asterisco (*) al final.
+     Ej: `{fmtBRL(val)}*`  — simple y claro.
+
+3. Vacío (sin pago ni previsto):
+   - Punto gris (·), igual que hoy
+
+**Cambios en los totales:**
+
+El endpoint ya devuelve month_totals y grand_total con la nueva lógica (incluye
+previstos). El frontend no necesita recalcular totales; solo renderizarlos.
+
+Sin embargo, los totales de columna en el header deben indicar visualmente si
+incluyen previstos o son todo pagado. Implementación sugerida:
+- Si month_totals[m] > paid_totals[m] → el total tiene componente previsto →
+  mostrar en ámbar en vez de verde.
+- Para esto, el backend también debe devolver paid_month_totals por separado,
+  o el frontend puede calcularlo sumando solo rows.months[m].
+
+Alternativa más simple (recomendada para no complicar): agregar al response
+del backend un campo `paid_month_totals: {1: float, ...}` que sume solo lo
+pagado por mes. El frontend puede comparar `month_totals[m] > paid_month_totals[m]`
+para decidir el color del total de columna.
+
+**Actualización optimista al guardar (saveCell):**
+
+La lógica actual de saveCell actualiza `row.months[m]` localmente. Al guardar,
+también debe limpiar `forecast_months[m]` en el estado local (porque una vez
+guardado el pago, el forecast de esa celda ya no se muestra):
+
+  const items = prev.items.map((row: any) => {
+    if (row.id !== instId) return row;
+    const months = { ...row.months, [month]: num || undefined };
+    const forecast_months = { ...row.forecast_months, [month]: undefined }; // ← NUEVO
+    const total = MONTHS.reduce((s, m) => s + (months[m] || row.forecast_months?.[m] || 0), 0); // ← recalcular con nueva lógica
+    return { ...row, months, forecast_months, total };
+  });
+
+**Leyenda en la grilla:**
+
+Agregar debajo de los controles de año (o debajo de la tabla) una leyenda pequeña:
+  ● Verde = pagado  ● Ámbar* = previsto sin pago registrado
+
+Implementación sugerida: una línea de texto pequeño (text-xs text-gray-400)
+con dos dots de color. Mantener discreta, no intrusiva.
+
+
+=============================================================================
+PASO 3 — Verificación manual
+=============================================================================
+
+Verificar estos escenarios en la UI:
+
+1. Celda con pago registrado: muestra en verde, al editar trae el valor pagado
+2. Celda con solo previsto: muestra en ámbar con asterisco, al editar trae el
+   valor previsto como punto de partida
+3. Celda sin pago ni previsto: muestra punto gris, al editar trae campo vacío
+4. Total de columna: si hay previstos en la columna, muestra en ámbar; si todo
+   es pagado, muestra en verde
+5. Total de fila (columna "Total"): suma pagado + previsto correctamente
+6. Grand total: suma correcta de todo
+7. Al guardar un pago en una celda prevista: la celda pasa de ámbar a verde,
+   el total se recalcula bien
+
+
+=============================================================================
+PASO FINAL — Documentación y commit
+=============================================================================
+
+a) Actualizar CONTEXT.md:
+   En la sección "Proventos (`/proventos`)" → "Grilla pagado", agregar:
+   "Celdas con forecast pero sin pago se muestran en ámbar (*) y se incluyen
+   en los totales. Al editar, el valor previsto se pre-popula en el input.
+   El backend devuelve `forecast_months` y `paid_month_totals` por instrumento."
+
+   En la sección de endpoints de `/api/proventos/grid`, actualizar descripción:
+   "Grilla editable mensual; incluye `forecast_months` (previstos donde no hay
+   pago) y `paid_month_totals` para coloración diferenciada de totales."
+
+b) Actualizar PLAN.md:
+   Agregar en Features Implementados:
+   "- [x] Grilla pagado: celdas previstas en ámbar, totales incluyen previstos,
+     edición pre-popula valor previsto"
+
+c) Mover spec a specs/done/:
+   mv docs/specs/pending/prompt_grilla_pagado_con_previstos.txt docs/specs/done/
+
+d) Commit convencional:
+   feat(proventos): show unpaid forecasts in grid with amber color and prefill on edit
+
+   - GET /api/proventos/grid now returns forecast_months and paid_month_totals
+   - Cells with only forecast shown in amber with asterisk marker
+   - Column totals colored amber when they include forecast amounts
+   - Edit input pre-populates with forecast value when no payment exists
+   - Row and column totals include forecast amounts for unpaid months
+
+
+=============================================================================
+TASKS.md — Lista de tareas para checkboxes y ClickUp
+=============================================================================
+
+- [ ] PASO 0: Crear TASKS.md y lista + tareas en ClickUp
+- [ ] BACKEND: Cargar forecast_map en get_proventos_grid() desde ProventoForecast
+- [ ] BACKEND: Construir forecast_months por instrumento (solo donde months[m] es null)
+- [ ] BACKEND: Recalcular total de fila sumando pagado + previsto
+- [ ] BACKEND: Recalcular month_totals sumando pagado + previsto por columna
+- [ ] BACKEND: Agregar paid_month_totals al response (solo suma pagados)
+- [ ] BACKEND: Recalcular grand_total con nueva lógica
+- [ ] FRONTEND: Actualizar onClick de celda para pre-popular con forecast si no hay pago
+- [ ] FRONTEND: Agregar lógica de color ternaria (verde / ámbar / gris)
+- [ ] FRONTEND: Mostrar asterisco en celdas previstas
+- [ ] FRONTEND: Colorear totales de columna en ámbar si incluyen previstos
+- [ ] FRONTEND: Actualizar saveCell para limpiar forecast_months en estado local
+- [ ] FRONTEND: Agregar leyenda verde/ámbar debajo de controles
+- [ ] VERIFICACIÓN: Recorrer los 7 escenarios del Paso 3
+- [ ] PASO FINAL: Actualizar CONTEXT.md y PLAN.md, mover spec, commit

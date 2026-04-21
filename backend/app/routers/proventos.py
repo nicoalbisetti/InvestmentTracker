@@ -268,12 +268,31 @@ def get_proventos_grid(
         .group_by(ProvéntoItem.instrument_id, extract('month', ProvéntoItem.date))
         .all()
     )
-    prov_map: dict[tuple, float] = {(r.instrument_id, int(r.month)): r.total for r in rows}
+    paid_map: dict[tuple, float] = {(r.instrument_id, int(r.month)): r.total for r in rows}
+
+    # Load forecast for the target year
+    forecast_rows = (
+        db.query(ProventoForecast.instrument_id, ProventoForecast.month, ProventoForecast.amount)
+        .filter(
+            ProventoForecast.instrument_id.in_(inst_ids),
+            ProventoForecast.year == target_year,
+        )
+        .all()
+    )
+    forecast_map: dict[tuple, float] = {(r.instrument_id, r.month): r.amount for r in forecast_rows}
 
     items = []
     for inst in instruments:
-        months = {m: prov_map.get((inst.id, m)) for m in MONTHS}
-        total = sum(v for v in months.values() if v)
+        months = {m: paid_map.get((inst.id, m)) for m in MONTHS}
+        # forecast_months: only where there is no paid amount
+        forecast_months = {
+            m: (forecast_map.get((inst.id, m)) if months[m] is None else None)
+            for m in MONTHS
+        }
+        total = sum(
+            (months[m] if months[m] is not None else (forecast_months[m] or 0))
+            for m in MONTHS
+        )
         items.append({
             "id": inst.id,
             "name": inst.name,
@@ -281,6 +300,7 @@ def get_proventos_grid(
             "location": inst.location,
             "custodian": inst.custodian,
             "months": months,
+            "forecast_months": forecast_months,
             "total": total,
         })
 
@@ -291,13 +311,24 @@ def get_proventos_grid(
         x["name"].lower(),
     ))
 
-    month_totals = {m: sum(row["months"].get(m) or 0 for row in items) for m in MONTHS}
+    # month_totals: paid + unpaid-forecast per column
+    month_totals = {
+        m: sum(
+            (row["months"].get(m) or 0) if row["months"].get(m) is not None
+            else (row["forecast_months"].get(m) or 0)
+            for row in items
+        )
+        for m in MONTHS
+    }
+    # paid_month_totals: only paid amounts per column (for color differentiation in frontend)
+    paid_month_totals = {m: sum(row["months"].get(m) or 0 for row in items) for m in MONTHS}
     grand_total = sum(month_totals.values())
 
     return {
         "year": target_year,
         "items": items,
         "month_totals": month_totals,
+        "paid_month_totals": paid_month_totals,
         "grand_total": grand_total,
     }
 

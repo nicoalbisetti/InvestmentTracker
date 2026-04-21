@@ -440,7 +440,7 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/?page&limit&status` | Tabla anual por instrumento (año actual = provento_items + forecast) |
 | GET | `/monthly?year` | Serie mensual: {month, amount(pagado), forecast(no pagado)} |
-| GET | `/grid?year&type` | Grilla editable mensual; orden: brasil→exterior→tipo→nombre |
+| GET | `/grid?year&type` | Grilla editable mensual; incluye `forecast_months` (previstos donde no hay pago) y `paid_month_totals` para coloración diferenciada de totales |
 | PATCH | `/grid/{instrument_id}/{year}/{month}` | Reemplaza TODOS los registros de la celda con uno MANUAL |
 
 ### `/api/proventos/forecast`
@@ -560,7 +560,7 @@ Tabla anual con diff, gain, net_flow. Gráfico de barras apiladas.
 Tres tabs:
 - **Histórico:** tabla anual por instrumento. Año actual = provento_items + forecast (misma lógica que gráfico).
 - **Mensual:** gráfico de barras apiladas (Pagado + Previsto por mes). Cards: total pagado, proyección anual, variación vs año anterior.
-- **Grilla pagado:** editable por celda, orden brasil→exterior→tipo→nombre.
+- **Grilla pagado:** editable por celda, orden brasil→exterior→tipo→nombre. Celdas con forecast pero sin pago se muestran en ámbar (*) y se incluyen en los totales. Al editar, el valor previsto se pre-popula en el input. El backend devuelve `forecast_months` y `paid_month_totals` por instrumento.
 - **Previsión:** grilla de forecast editable, mismo orden.
 **API:** `/api/proventos`, `/api/proventos/monthly`, `/api/proventos/grid`, `/api/proventos/forecast`
 
@@ -740,6 +740,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Ticker de renta variable en dashboard (yfinance, cache 5 min, animación marquee, hover pause)
 - [x] Rescate total de instrumento (ícono en tabla de posiciones para renta fija)
 - [x] Creación manual de instrumento con saldo inicial opcional (modal en Settings → Catálogo)
+- [x] Grilla pagado: celdas previstas en ámbar (*), totales de columna/fila incluyen previstos no pagados, edición pre-popula valor previsto
 
 ---
 

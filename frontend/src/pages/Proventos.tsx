@@ -302,19 +302,29 @@ function PaidGrid() {
       const items = prev.items.map((row: any) => {
         if (row.id !== instId) return row;
         const months = { ...row.months, [month]: num || undefined };
-        const total = MONTHS.reduce((s: number, m: number) => s + (months[m] || 0), 0);
-        return { ...row, months, total };
+        const forecast_months = { ...row.forecast_months, [month]: undefined };
+        const total = MONTHS.reduce((s: number, m: number) =>
+          s + (months[m] != null ? months[m] : (forecast_months[m] || 0)), 0);
+        return { ...row, months, forecast_months, total };
       });
-      const month_totals = { ...prev.month_totals, [month]: items.reduce((s: number, r: any) => s + (r.months[month] || 0), 0) };
+      const month_totals = {
+        ...prev.month_totals,
+        [month]: items.reduce((s: number, r: any) =>
+          s + (r.months[month] != null ? r.months[month] : (r.forecast_months?.[month] || 0)), 0),
+      };
+      const paid_month_totals = {
+        ...prev.paid_month_totals,
+        [month]: items.reduce((s: number, r: any) => s + (r.months[month] || 0), 0),
+      };
       const grand_total = MONTHS.reduce((s: number, m: number) => s + (month_totals[m] || 0), 0);
-      return { ...prev, items, month_totals, grand_total };
+      return { ...prev, items, month_totals, paid_month_totals, grand_total };
     });
   };
 
   if (loading) return <div className="p-5"><SkeletonTable rows={6} /></div>;
   if (!gridData) return null;
 
-  const { items, month_totals, grand_total } = gridData;
+  const { items, month_totals, paid_month_totals, grand_total } = gridData;
 
   return (
     <div className="space-y-0">
@@ -345,6 +355,18 @@ function PaidGrid() {
         </span>
       </div>
 
+      {/* Legend */}
+      <div className="flex items-center gap-4 px-4 py-1.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
+        <span className="flex items-center gap-1 text-xs text-gray-400">
+          <span className="inline-block w-2 h-2 rounded-full bg-emerald-500"></span>
+          Verde = pagado
+        </span>
+        <span className="flex items-center gap-1 text-xs text-gray-400">
+          <span className="inline-block w-2 h-2 rounded-full bg-amber-400"></span>
+          Ámbar* = previsto sin pago registrado
+        </span>
+      </div>
+
       {/* Table */}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -366,11 +388,14 @@ function PaidGrid() {
               <td className="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
                 {fmtBRL(grand_total)}
               </td>
-              {MONTHS.map(m => (
-                <td key={m} className="px-2 py-2 text-center font-mono text-xs text-emerald-700 dark:text-emerald-400">
-                  {month_totals[m] ? fmtBRL(month_totals[m]) : '—'}
-                </td>
-              ))}
+              {MONTHS.map(m => {
+                const hasForecasts = paid_month_totals && month_totals[m] > (paid_month_totals[m] || 0);
+                return (
+                  <td key={m} className={`px-2 py-2 text-center font-mono text-xs ${hasForecasts ? 'text-amber-500 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
+                    {month_totals[m] ? fmtBRL(month_totals[m]) : '—'}
+                  </td>
+                );
+              })}
             </tr>
             {/* Instrument rows */}
             {items.map((row: any) => (
@@ -384,12 +409,21 @@ function PaidGrid() {
                 </td>
                 {MONTHS.map(m => {
                   const isEditing = editing?.instId === row.id && editing?.month === m;
-                  const val = row.months[m];
+                  const paid = row.months[m];
+                  const forecast = row.forecast_months?.[m];
                   return (
                     <td
                       key={m}
                       className="px-1 py-1 text-center cursor-pointer group"
-                      onClick={() => !isEditing && setEditing({ instId: row.id, month: m, value: val != null ? String(val) : '' })}
+                      onClick={() => {
+                        if (isEditing) return;
+                        const initialValue = paid != null
+                          ? String(paid)
+                          : forecast != null
+                            ? String(forecast)
+                            : '';
+                        setEditing({ instId: row.id, month: m, value: initialValue });
+                      }}
                     >
                       {isEditing ? (
                         <input
@@ -403,10 +437,16 @@ function PaidGrid() {
                             if (e.key === 'Escape') setEditing(null);
                           }}
                         />
-                      ) : (
-                        <span className={`text-xs font-mono group-hover:underline decoration-dotted ${val ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-200 dark:text-gray-700'}`}>
-                          {val ? fmtBRL(val) : '·'}
+                      ) : paid != null ? (
+                        <span className="text-xs font-mono group-hover:underline decoration-dotted text-emerald-600 dark:text-emerald-400">
+                          {fmtBRL(paid)}
                         </span>
+                      ) : forecast != null ? (
+                        <span className="text-xs font-mono group-hover:underline decoration-dotted text-amber-500 dark:text-amber-400 italic">
+                          {fmtBRL(forecast)}*
+                        </span>
+                      ) : (
+                        <span className="text-xs font-mono text-gray-200 dark:text-gray-700">·</span>
                       )}
                     </td>
                   );

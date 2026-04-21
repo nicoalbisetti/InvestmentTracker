@@ -1,30 +1,17 @@
-# Nuevo Instrumento Manual
+# TASKS — Grilla Pagado con Previstos
 
-## Descripción
-Agregar en Settings → Catálogo de Instrumentos un botón "+ Nuevo Instrumento" que abre un modal con formulario completo para crear un instrumento manualmente, con saldo inicial opcional.
-
-## Tareas
-
-### Backend
-- [x] Actualizar `InstrumentCreate` schema en `backend/app/schemas/instrument.py` con todos los campos nuevos
-- [x] Agregar endpoint `POST /api/instruments` en `backend/app/routers/instruments.py`
-  - Validar name/custodian no vacíos
-  - Verificar duplicado (name + custodian) → 409
-  - Crear Instrument
-  - Si hay balance_brl: crear MonthlyPosition, calcular balance_usd desde quotes, actualizar cache
-
-### Frontend — API Client
-- [x] Agregar función `createInstrument(data)` en `frontend/src/api/instruments.ts`
-
-### Frontend — Settings.tsx
-- [x] Agregar estados: `showCreate`, `createForm`, `createSaving`, `createError`, `createWarning`
-- [x] Agregar botón "+ Nuevo Instrumento" en la barra de filtros del catálogo
-- [x] Agregar modal de creación con formulario completo (2 columnas, campos condicionales)
-- [x] Comportamiento dinámico: currency↔location, asset_class/index_type ocultos si no renta_fija
-- [x] Implementar `handleCreateInstrument()` con validación cliente + llamada API
-- [x] Mostrar warning amarillo 5s después de creación exitosa con warning
-
-### Documentación
-- [x] Actualizar `CONTEXT.md`
-- [x] Actualizar `PLAN.md`
-- [x] Mover spec a `specs/done/`
+- [ ] PASO 0: Crear TASKS.md y lista + tareas en ClickUp
+- [ ] BACKEND: Cargar forecast_map en get_proventos_grid() desde ProventoForecast
+- [ ] BACKEND: Construir forecast_months por instrumento (solo donde months[m] es null)
+- [ ] BACKEND: Recalcular total de fila sumando pagado + previsto
+- [ ] BACKEND: Recalcular month_totals sumando pagado + previsto por columna
+- [ ] BACKEND: Agregar paid_month_totals al response (solo suma pagados)
+- [ ] BACKEND: Recalcular grand_total con nueva lógica
+- [ ] FRONTEND: Actualizar onClick de celda para pre-popular con forecast si no hay pago
+- [ ] FRONTEND: Agregar lógica de color ternaria (verde / ámbar / gris)
+- [ ] FRONTEND: Mostrar asterisco en celdas previstas
+- [ ] FRONTEND: Colorear totales de columna en ámbar si incluyen previstos
+- [ ] FRONTEND: Actualizar saveCell para limpiar forecast_months en estado local
+- [ ] FRONTEND: Agregar leyenda verde/ámbar debajo de controles
+- [ ] VERIFICACIÓN: Recorrer los 7 escenarios del Paso 3
+- [ ] PASO FINAL: Actualizar CONTEXT.md y PLAN.md, mover spec, commit

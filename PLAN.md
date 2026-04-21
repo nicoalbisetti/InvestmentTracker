@@ -232,6 +232,7 @@ GET  /api/import/history              # Historial de importaciones
 - [x] Rescate total de instrumento — ícono en tabla de posiciones para renta fija activa, modal confirmación, endpoint atómico
 - [x] Creación manual de instrumento — botón + Nuevo Instrumento en Settings, modal formulario completo, saldo inicial opcional con cálculo automático de balance_usd
 - [x] Retornos por período sin campos legacy — compute_period_return() con rama price (accion/fii) y balance (Modified Dietz para el resto), return_source en Instrument, tooltips en Positions
+- [x] Grilla pagado: celdas previstas en ámbar, totales incluyen previstos, edición pre-popula valor previsto
 
 ### Fase 4 — Frontend resto de paginas
 14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)
