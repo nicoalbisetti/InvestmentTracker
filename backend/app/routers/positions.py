@@ -614,8 +614,6 @@ def update_usd_rate(
         snap.usd_rate = usd_rate
         if snap.total_brl:
             snap.total_usd = snap.total_brl / usd_rate
-        if snap.total_with_prev:
-            snap.total_usd_with_prev = snap.total_with_prev / usd_rate
 
     db.commit()
     return {
@@ -748,13 +746,8 @@ def recalculate_stats(db: Session = Depends(get_db)):
             .scalar() or 0
         )
         latest_snap.total_brl = month_total
-        # total_with_prev = live sum across all active instruments (any month)
-        latest_snap.total_with_prev = total
-        latest_snap.total_usd_with_prev = total_usd
         if latest_snap.usd_rate and latest_snap.usd_rate > 0:
             latest_snap.total_usd = month_total / latest_snap.usd_rate
-        if total_usd == 0 and latest_snap.usd_rate and latest_snap.usd_rate > 0:
-            latest_snap.total_usd_with_prev = total / latest_snap.usd_rate
         db.commit()
 
     return {"updated": updated, "total_portfolio": round(total, 2)}

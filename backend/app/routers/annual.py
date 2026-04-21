@@ -25,7 +25,7 @@ def get_annual_summary(db: Session = Depends(get_db)):
         .all()
     )
     end_by_year = {
-        s.date.year: (s.total_with_prev or s.total_brl or 0)
+        s.date.year: (s.total_brl or 0)
         for s in dec_snapshots
     }
 
@@ -36,9 +36,7 @@ def get_annual_summary(db: Session = Depends(get_db)):
         .first()
     )
     if latest_snapshot:
-        end_by_year[current_year] = (
-            latest_snapshot.total_with_prev or latest_snapshot.total_brl or 0
-        )
+        end_by_year[current_year] = latest_snapshot.total_brl or 0
 
     # start-of-year = end of previous year
     start_by_year = {yr: end_by_year.get(yr - 1) for yr in end_by_year}

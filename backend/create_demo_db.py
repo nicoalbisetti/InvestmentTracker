@@ -212,10 +212,8 @@ def main():
         ).fetchone()[0]
 
         snap_dict["total_brl"] = round(total_brl, 2)
-        snap_dict["total_with_prev"] = round(total_brl, 2)
         if snap_usd_rate:
             snap_dict["total_usd"] = round(total_brl / snap_usd_rate, 2)
-            snap_dict["total_usd_with_prev"] = round(total_brl / snap_usd_rate, 2)
 
         # Zero out custodian breakdowns (personal data)
         for col in snap_cols:

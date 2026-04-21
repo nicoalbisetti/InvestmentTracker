@@ -8,10 +8,8 @@ class PortfolioSnapshot(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date, nullable=False, index=True, unique=True)
     total_brl = Column(Float, nullable=True)
-    total_with_prev = Column(Float, nullable=True)
     total_without_b3 = Column(Float, nullable=True)
     total_usd = Column(Float, nullable=True)
-    total_usd_with_prev = Column(Float, nullable=True)
     usd_rate = Column(Float, nullable=True)
     monthly_change_pct = Column(Float, nullable=True)
 
