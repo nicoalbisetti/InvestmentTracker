@@ -1,17 +1,73 @@
-# TASKS — Grilla Pagado con Previstos
+# TASKS — Crecimiento de Patrimonio
 
-- [ ] PASO 0: Crear TASKS.md y lista + tareas en ClickUp
-- [ ] BACKEND: Cargar forecast_map en get_proventos_grid() desde ProventoForecast
-- [ ] BACKEND: Construir forecast_months por instrumento (solo donde months[m] es null)
-- [ ] BACKEND: Recalcular total de fila sumando pagado + previsto
-- [ ] BACKEND: Recalcular month_totals sumando pagado + previsto por columna
-- [ ] BACKEND: Agregar paid_month_totals al response (solo suma pagados)
-- [ ] BACKEND: Recalcular grand_total con nueva lógica
-- [ ] FRONTEND: Actualizar onClick de celda para pre-popular con forecast si no hay pago
-- [ ] FRONTEND: Agregar lógica de color ternaria (verde / ámbar / gris)
-- [ ] FRONTEND: Mostrar asterisco en celdas previstas
-- [ ] FRONTEND: Colorear totales de columna en ámbar si incluyen previstos
-- [ ] FRONTEND: Actualizar saveCell para limpiar forecast_months en estado local
-- [ ] FRONTEND: Agregar leyenda verde/ámbar debajo de controles
-- [ ] VERIFICACIÓN: Recorrer los 7 escenarios del Paso 3
-- [ ] PASO FINAL: Actualizar CONTEXT.md y PLAN.md, mover spec, commit
+Feature: Reemplazar /annual con vista de Crecimiento de Patrimonio (anual + mensual)
+Spec: specs/pending/prompt_crecimiento_patrimonio.txt
+
+---
+
+## PASO 0
+
+- [x] Crear TASKS.md con todas las tareas
+- [x] Crear lista en ClickUp (folder_id: 90177874339)
+- [ ] Crear tareas en ClickUp por cada ítem
+
+---
+
+## BACKEND
+
+- [ ] Reemplazar contenido de `backend/app/routers/annual.py`:
+  - Endpoint `GET /api/annual` con lógica híbrida Transaction + AnnualSummary + PortfolioSnapshot
+  - Calcular net_flow, gain, patrimonio_inicio, patrimonio_fin, data_source por año
+  - Métricas globales: total_invested, total_gained, gain_ratio, cagr
+- [ ] Agregar endpoint `GET /api/annual/monthly?year=`:
+  - Serie mensual de patrimonio (PortfolioSnapshot más cercano a cada mes)
+  - Transacciones del año agrupadas y en lista
+  - Valorización acumulada por mes
+  - Summary del año
+
+---
+
+## FRONTEND
+
+- [ ] Crear `frontend/src/api/growth.ts`:
+  - Tipos: AnnualItem, AnnualGrowthResponse, MonthlyPoint, MonthlyTransaction, MonthlyGrowthResponse
+  - Funciones: `getAnnualGrowth()`, `getMonthlyGrowth(year)`
+
+- [ ] Reemplazar `frontend/src/pages/Annual.tsx` — Vista Anual:
+  - Header: título + total actual + tabs Anual/Mensual
+  - Cards de métricas (4): total aportado, ganado por mercado, CAGR, mejor año
+  - Gráfico barras agrupadas (Recharts): net_flow + gain por año, línea patrimonio_fin
+  - Tabla anual: Año | Inicio | Aportes netos | Valorización | Fin | Crecim. | % valor. | Fuente
+  - Indicador de fuente: ⚡ calculated vs 📋 legacy con tooltip
+
+- [ ] Agregar Vista Mensual en `Annual.tsx`:
+  - Selector de año (select con años DESC)
+  - Cards de métricas (3): patrimonio fin, aportes netos, valorización
+  - Gráfico de líneas (Recharts): patrimonio + valorización acum., dots personalizados en movimientos
+  - Lista de movimientos del año
+
+- [ ] Verificar consumidores de `annual.ts` y eliminar si solo lo usa Annual.tsx
+- [ ] BarChartComp.tsx se mantiene (lo usa Proventos.tsx)
+
+---
+
+## QA
+
+- [ ] GET /api/annual responde con items y metrics
+- [ ] GET /api/annual/monthly?year=2024 responde con 12 meses, transactions y summary
+- [ ] data_source = "calculated" para año con transacciones
+- [ ] data_source = "legacy" para año sin transacciones
+- [ ] metrics.cagr calculado correctamente
+- [ ] Frontend: tab Anual funciona con tabla Fuente + íconos/tooltips
+- [ ] Frontend: tab Mensual con selector de año y puntos de color en movimientos
+- [ ] Frontend: cards de métricas correctas
+
+---
+
+## PASO FINAL
+
+- [ ] Actualizar CONTEXT.md (sección Annual)
+- [ ] Actualizar PLAN.md
+- [ ] Mover spec a specs/done/
+- [ ] Commit y push
+- [ ] Mensaje Slack #claudio-coding

@@ -1,0 +1,475 @@
+=============================================================================
+INVESTMENT TRACKER — CRECIMIENTO DE PATRIMONIO
+Reemplaza la página /annual con vista de crecimiento anual + mensual
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md y este archivo completo antes de escribir cualquier código.
+
+PASO 0 — Setup obligatorio
+---------------------------
+a) Crear TASKS.md en la raíz con todas las tareas como checkboxes.
+   No iniciar el desarrollo hasta tener el TASKS.md completo.
+
+b) Crear lista en ClickUp dentro del folder InvestmentTracker (folder_id: 90177874339):
+     clickup_create_list_in_folder(
+       folder_id="90177874339",
+       name="Feature — Crecimiento de Patrimonio"
+     )
+
+c) Crear una tarea por ítem del TASKS.md con clickup_create_task.
+   Guardar los IDs retornados para marcarlos como completados.
+
+d) Guardar este spec en el repositorio:
+     mv prompt_crecimiento_patrimonio.txt specs/pending/prompt_crecimiento_patrimonio.txt
+     git add specs/pending/prompt_crecimiento_patrimonio.txt
+     git commit -m "docs: add spec for crecimiento de patrimonio"
+     git push
+
+e) Recién después iniciar el desarrollo.
+   Marcar cada tarea como completada en ClickUp al terminarla.
+
+
+PASO FINAL — Al terminar toda la implementación
+------------------------------------------------
+1. git add -A
+   git commit -m "feat(annual): reemplaza Annual con Crecimiento de Patrimonio
+
+   - Nuevo endpoint GET /api/annual con lógica híbrida: Transaction cuando
+     hay datos, AnnualSummary legacy para años sin transacciones
+   - Nuevo endpoint GET /api/annual/monthly?year= para vista mensual
+   - Elimina: frontend/src/api/annual.ts (reemplazado por growth.ts)
+   - Elimina: frontend/src/components/charts/BarChartComp.tsx si no tiene
+     otros consumidores (verificar antes de eliminar)
+   - Reemplaza: frontend/src/pages/Annual.tsx → GrowthAnnual.tsx
+   - Vista anual: tabla + gráfico barras agrupadas (aportes vs. valorización)
+   - Vista mensual: línea de patrimonio + marcadores de movimientos + lista
+   - Indicador de fuente de dato (calculado vs. legacy) por fila"
+   git push
+
+2. Actualizar CONTEXT.md:
+   - Sección "Páginas del Frontend": actualizar entrada Annual (/annual)
+     con la nueva descripción
+   - Sección "Endpoints Implementados /api/annual": reemplazar GET /
+     con los dos nuevos endpoints y su lógica
+
+3. Actualizar PLAN.md: marcar el feature como completado.
+
+4. Mover spec:
+     git mv specs/pending/prompt_crecimiento_patrimonio.txt specs/done/
+     git commit -m "docs: move crecimiento patrimonio spec to done"
+     git push
+
+5. Enviar mensaje de cierre al canal Slack #claudio-coding (channel_id: C0AMM733V1Q).
+
+
+=============================================================================
+1. CONTEXTO Y OBJETIVO
+=============================================================================
+
+La página /annual actual muestra una tabla y gráfico de barras apiladas con
+diff, gain y net_flow por año. Es funcional pero no comunica claramente la
+historia de crecimiento del patrimonio: ¿cuánto creció por decisiones del
+inversor (aportes/rescates) vs. cuánto aportó el mercado (valorización)?
+
+Esta feature reemplaza /annual completamente con una pantalla de "Crecimiento
+de Patrimonio" con dos vistas:
+
+  - Vista Anual:  tabla + gráfico histórico 2015–hoy, foco en composición
+                  del crecimiento año a año
+  - Vista Mensual: línea de patrimonio mensual para un año seleccionado,
+                   con marcadores visuales de aportes y rescates
+
+
+=============================================================================
+2. LÓGICA DE DATOS — CÁLCULO HÍBRIDO
+=============================================================================
+
+El campo AnnualSummary.gain y .net_flow contienen datos importados del Excel
+histórico (2015–primeros años de uso de la app). La tabla transactions contiene
+movimientos reales registrados en la app, incompletos hacia atrás.
+
+Regla de precedencia (aplicar en el backend, por año):
+
+  txn_net_flow = SUM de transactions del año donde:
+    - type = 'aplicacion' → sumar positivo
+    - type = 'rescate'    → sumar negativo
+    - amount_brl no nulo
+
+  SI txn_net_flow != 0 (hay al menos una transacción ese año):
+    → net_flow = txn_net_flow  (dato en vivo desde Transaction)
+    → patrimonio_inicio = PortfolioSnapshot de diciembre del año anterior
+      (total_with_prev o total_brl como fallback)
+      Si no existe snapshot de diciembre anterior → usar AnnualSummary.total
+    → patrimonio_fin = PortfolioSnapshot de diciembre de ese año
+      (total_with_prev o total_brl)
+      Para el año en curso: usar el snapshot más reciente disponible
+    → gain = patrimonio_fin - patrimonio_inicio - net_flow
+    → data_source = "calculated"
+
+  SI txn_net_flow == 0 (sin transacciones ese año):
+    → net_flow = AnnualSummary.net_flow
+    → gain = AnnualSummary.gain
+    → patrimonio_inicio = AnnualSummary.total (valor inicio almacenado)
+    → patrimonio_fin = reconstruir desde PortfolioSnapshot si existe,
+      sino calcular como patrimonio_inicio + net_flow + gain
+    → data_source = "legacy"
+
+Importante: un año con txn_net_flow == 0 puede tener rescates y aplicaciones
+que se cancelan entre sí. Este es un caso borde que se acepta como limitación
+documentada — la lógica es correcta en la gran mayoría de años.
+
+
+=============================================================================
+3. BACKEND
+=============================================================================
+
+Archivo: backend/app/routers/annual.py
+Acción: REEMPLAZAR el contenido del archivo por completo.
+
+El router existente tiene un único endpoint GET / que se elimina y se
+reemplaza por dos nuevos endpoints descritos a continuación.
+
+
+--- 3.1 GET /api/annual ---
+
+Sin parámetros query.
+
+Lógica:
+1. Obtener todos los AnnualSummary ordenados por year ASC.
+2. Obtener todos los PortfolioSnapshot con mes = 12 (snapshots de diciembre)
+   y el snapshot más reciente (para el año en curso).
+3. Construir end_by_year: {año: total_with_prev o total_brl} desde snapshots.
+4. Para el año en curso, si no hay snapshot de diciembre, usar el más reciente.
+5. Para cada año en AnnualSummary, calcular txn_net_flow desde Transaction
+   filtrando por fecha dentro del año (ene 1 – dic 31).
+6. Aplicar la regla de precedencia del punto 2 para determinar:
+   net_flow, gain, patrimonio_inicio, patrimonio_fin, data_source.
+7. Calcular diff = patrimonio_fin - patrimonio_inicio (puede ser nulo si faltan
+   snapshots en años legacy).
+8. Calcular pct_growth = diff / patrimonio_inicio si patrimonio_inicio > 0.
+9. Calcular pct_valorization = gain / diff si diff != 0 (proporción del
+   crecimiento explicada por el mercado).
+
+Respuesta JSON:
+{
+  "items": [
+    {
+      "year": 2024,
+      "patrimonio_inicio": 1242000.0,
+      "patrimonio_fin": 1489000.0,
+      "net_flow": 80000.0,
+      "gain": 167000.0,
+      "diff": 247000.0,
+      "pct_growth": 0.1989,
+      "pct_valorization": 0.676,
+      "data_source": "calculated"   // "calculated" | "legacy"
+    }
+  ],
+  "metrics": {
+    "total_invested": 980000.0,     // SUM(net_flow) de todos los años
+    "total_gained": 867000.0,       // SUM(gain) de todos los años
+    "gain_ratio": 0.885,            // total_gained / total_invested
+    "cagr": 0.142                   // calculado desde patrimonio más antiguo
+                                    // al más reciente, en años
+  }
+}
+
+CAGR: (patrimonio_fin_ultimo_año / patrimonio_inicio_primer_año)^(1/n_años) - 1
+donde n_años = diferencia en años entre el primer y último año con datos.
+Si patrimonio_inicio_primer_año es nulo o 0, omitir cagr (null).
+
+
+--- 3.2 GET /api/annual/monthly ---
+
+Parámetro query: year: int (requerido)
+
+Lógica:
+1. Para cada mes del año (1–12), obtener el PortfolioSnapshot más cercano
+   a {year}-{month}-01 con fecha <= ese día, LIMIT 1 ORDER BY date DESC.
+   Si no existe → valor null.
+2. Obtener todas las Transaction del año, agrupadas por mes.
+   Por mes: net_flow = SUM(aplicacion) - SUM(rescate).
+3. Calcular valorización acumulada del año:
+   - base = patrimonio del snapshot de diciembre del año anterior
+     (o primer snapshot disponible del año si no hay dic anterior)
+   - Para cada mes: valorizacion_acum = patrimonio_mes - base - SUM(net_flow acumulado hasta ese mes)
+4. Construir la lista de movimientos (transacciones individuales del año):
+   para cada Transaction del año, incluir fecha, tipo, amount_brl, instrument_name.
+
+Respuesta JSON:
+{
+  "year": 2024,
+  "months": [
+    {
+      "month": 1,
+      "patrimonio": 1300000.0,
+      "net_flow": 0.0,
+      "valorizacion_acum": 58000.0
+    },
+    ...
+  ],
+  "transactions": [
+    {
+      "date": "2024-03-15",
+      "month": 3,
+      "type": "aplicacion",
+      "amount_brl": 40000.0,
+      "instrument_name": "CDB XP 110% CDI"
+    },
+    ...
+  ],
+  "summary": {
+    "patrimonio_inicio": 1242000.0,
+    "patrimonio_fin": 1489000.0,
+    "net_flow_total": 80000.0,
+    "gain_total": 167000.0,
+    "pct_net_flow": 0.324,    // net_flow_total / diff
+    "pct_gain": 0.676         // gain_total / diff
+  }
+}
+
+Para meses sin snapshot (null), el frontend mostrará el punto como vacío
+(Chart.js spanGaps: false).
+
+
+=============================================================================
+4. FRONTEND
+=============================================================================
+
+--- 4.1 Archivos a eliminar ---
+
+  frontend/src/api/annual.ts
+    → Verificar que ningún otro componente lo importe antes de eliminar.
+      Si hay otros importadores, mantener el archivo y solo actualizar
+      las funciones que usa Annual.tsx.
+
+  frontend/src/pages/Annual.tsx
+    → Eliminar. Será reemplazado por el nuevo componente.
+
+  frontend/src/components/charts/BarChartComp.tsx
+    → Verificar si tiene otros consumidores con:
+         grep -r "BarChartComp" frontend/src --include="*.tsx" --include="*.ts"
+      Si solo lo usa Annual.tsx → eliminar.
+      Si tiene otros consumidores → mantener.
+
+
+--- 4.2 Archivos a crear ---
+
+  frontend/src/api/growth.ts
+    Exportar:
+      getAnnualGrowth(): Promise<AnnualGrowthResponse>
+      getMonthlyGrowth(year: number): Promise<MonthlyGrowthResponse>
+
+    Tipado:
+      interface AnnualItem {
+        year: number
+        patrimonio_inicio: number | null
+        patrimonio_fin: number | null
+        net_flow: number | null
+        gain: number | null
+        diff: number | null
+        pct_growth: number | null
+        pct_valorization: number | null
+        data_source: 'calculated' | 'legacy'
+      }
+      interface AnnualGrowthResponse {
+        items: AnnualItem[]
+        metrics: {
+          total_invested: number | null
+          total_gained: number | null
+          gain_ratio: number | null
+          cagr: number | null
+        }
+      }
+      interface MonthlyPoint {
+        month: number
+        patrimonio: number | null
+        net_flow: number
+        valorizacion_acum: number | null
+      }
+      interface MonthlyTransaction {
+        date: string
+        month: number
+        type: 'aplicacion' | 'rescate'
+        amount_brl: number
+        instrument_name: string
+      }
+      interface MonthlyGrowthResponse {
+        year: number
+        months: MonthlyPoint[]
+        transactions: MonthlyTransaction[]
+        summary: {
+          patrimonio_inicio: number | null
+          patrimonio_fin: number | null
+          net_flow_total: number
+          gain_total: number | null
+          pct_net_flow: number | null
+          pct_gain: number | null
+        }
+      }
+
+
+  frontend/src/pages/Annual.tsx (nuevo contenido — reemplaza el viejo)
+    Componente principal. Registrado en la ruta /annual existente en App.tsx
+    sin cambiar el nombre del archivo para evitar tocar el router.
+
+    Layout general:
+    ┌─────────────────────────────────────────────────────┐
+    │  Crecimiento de Patrimonio                          │
+    │  R$ [total actual]         [Anual] [Mensual]        │
+    ├─────────────────────────────────────────────────────┤
+    │  [cards de métricas — 4 columnas]                   │
+    ├─────────────────────────────────────────────────────┤
+    │  [gráfico principal]                                │
+    ├─────────────────────────────────────────────────────┤
+    │  [tabla / lista de movimientos]                     │
+    └─────────────────────────────────────────────────────┘
+
+    Estado local:
+      view: 'anual' | 'mensual'  (default: 'anual')
+      selectedYear: number        (default: año en curso)
+      annualData: AnnualGrowthResponse | null
+      monthlyData: MonthlyGrowthResponse | null
+      loading: boolean
+
+    Carga de datos:
+      - Al montar: cargar annualData
+      - Al cambiar a vista mensual o cambiar selectedYear: cargar monthlyData
+      - Usar React.useEffect con dependencias [view, selectedYear]
+      - Mostrar skeleton de carga (animate-pulse) mientras loading = true
+
+    ── VISTA ANUAL ──
+
+    Métricas (4 cards):
+      - Total aportado histórico: fmtBRL(metrics.total_invested)
+      - Ganado por mercado:       fmtBRL(metrics.total_gained) en verde si > 0
+      - CAGR del portfolio:       fmtPct(metrics.cagr) con "anualizado"
+      - Mejor año por valoriz.:   el año con mayor gain absoluto
+
+    Gráfico de barras agrupadas (Recharts BarChart):
+      - Eje X: año
+      - Dos barras por año, agrupadas (no apiladas):
+          Barra 1 "Aportes netos": net_flow, color azul (#378ADD)
+                                   color rojo (#E24B4A) si net_flow < 0
+          Barra 2 "Valorización":  gain, color verde (#639922)
+                                   color rojo (#E24B4A) si gain < 0
+      - Línea secundaria sobre eje Y derecho: patrimonio_fin por año
+        Color gris, strokeDasharray="4 2", dots pequeños
+      - Tooltip personalizado mostrando los tres valores (net_flow, gain,
+        patrimonio_fin) formateados con fmtBRL
+      - Leyenda custom debajo del gráfico (no usar la default de Recharts):
+          cuadrado azul "Aportes netos"
+          cuadrado verde "Valorización"
+          línea gris "Patrimonio fin de año"
+      - Height: 300px
+
+    Nota sobre colores dinámicos en Recharts:
+      Recharts no soporta color dinámico por valor en BarChart de la misma
+      manera que Chart.js. Usar Cell de recharts para colorear cada barra:
+        import { Cell } from 'recharts'
+        <Bar dataKey="net_flow" ...>
+          {data.map((entry, i) => (
+            <Cell key={i} fill={entry.net_flow >= 0 ? '#378ADD' : '#E24B4A'} />
+          ))}
+        </Bar>
+
+    Tabla anual:
+      Columnas: Año | Inicio | Aportes netos | Valorización | Fin | Crecim. | % valor. | Fuente
+      - Año: bold
+      - Inicio: fmtBRL, gris
+      - Aportes netos: badge azul si > 0, badge rojo si < 0
+      - Valorización: badge verde si > 0, badge rojo si < 0
+      - Fin: bold
+      - Crecim.: badge verde/rojo con pct_growth
+      - % valor.: pct_valorization formateado como "71%" (sin decimales)
+      - Fuente: ícono pequeño con tooltip
+          data_source = "calculated" → ícono ⚡ con tooltip "Calculado desde transacciones"
+          data_source = "legacy"     → ícono 📋 con tooltip "Dato histórico importado"
+      - Orden: DESC por año (más reciente arriba)
+      - Hover: bg-gray-50 dark:bg-gray-800/50
+
+    ── VISTA MENSUAL ──
+
+    Selector de año: <select> con los años disponibles en annualData.items,
+    ordenados DESC. Default: año en curso.
+
+    Métricas (3 cards):
+      - Patrimonio fin del año seleccionado: summary.patrimonio_fin
+      - Aportes netos del año: summary.net_flow_total con badge % (pct_net_flow)
+      - Valorización del año: summary.gain_total en verde, con badge % (pct_gain)
+
+    Gráfico de líneas (Recharts LineChart):
+      - Eje X: meses (Ene–Dic), etiquetas siempre visibles
+      - Línea 1 "Patrimonio total":
+          dataKey="patrimonio", color azul (#378ADD), strokeWidth=2
+          connectNulls={false} para que los gaps aparezcan como interrupciones
+          Puntos normales: radius 3, fill azul
+          Puntos con movimiento ese mes (net_flow != 0): radius 7,
+            fill verde (#639922) si aplicacion, fill rojo (#E24B4A) si rescate
+            → Para esto usar Dot personalizado: comprobar si transactions
+              tiene alguna entrada para ese month, y si su net_flow es positivo
+              o negativo
+      - Línea 2 "Valorización acum.":
+          dataKey="valorizacion_acum", color verde (#639922),
+          strokeDasharray="4 3", strokeWidth=1.5, no dots
+      - Dos ejes Y: izquierdo para patrimonio, derecho para valorización acum.
+      - Tooltip: mostrar patrimonio + valorización acumulada del mes hover,
+        y si hay movimientos ese mes listarlos
+      - Height: 300px
+
+    Lista de movimientos:
+      Título: "Movimientos del año"
+      Por cada transaction en monthlyData.transactions, ordenadas por fecha:
+        [fecha] [badge tipo] [instrument_name] [fmtBRL(amount_brl)]
+        badge verde "aporte" o badge rojo "rescate"
+      Si no hay transacciones: "Sin movimientos registrados para este año"
+        con nota en gris: "Los movimientos históricos provienen de datos importados"
+
+
+=============================================================================
+5. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+[ ] GET /api/annual responde correctamente con items y metrics
+[ ] GET /api/annual/monthly?year=2024 responde con 12 meses, transactions y summary
+[ ] Para un año con transacciones: data_source = "calculated", valores calculados
+    desde Transaction + PortfolioSnapshot
+[ ] Para un año sin transacciones: data_source = "legacy", valores de AnnualSummary
+[ ] metrics.cagr es null si no hay patrimonio inicial disponible
+[ ] Frontend: tab Anual muestra tabla con columna Fuente y sus íconos/tooltips
+[ ] Frontend: tab Mensual muestra línea de patrimonio con puntos de color en meses
+    con movimientos
+[ ] Frontend: selector de año en vista mensual funciona y recarga datos
+[ ] Frontend: cards de métricas muestran porcentajes de composición del crecimiento
+[ ] Frontend: archivos Annual.tsx (viejo), annual.ts y BarChartComp.tsx (si sin
+    otros consumidores) eliminados del repo
+[ ] CONTEXT.md y PLAN.md actualizados
+[ ] Spec movido a specs/done/
+
+
+=============================================================================
+TASKS.md — Lista de tareas para checkboxes y ClickUp
+=============================================================================
+
+- [ ] PASO 0: Crear TASKS.md, lista y tareas en ClickUp, commitear spec
+- [ ] BACKEND: Reemplazar contenido de annual.py — endpoint GET /api/annual
+      con lógica híbrida Transaction + AnnualSummary + PortfolioSnapshot
+- [ ] BACKEND: Agregar endpoint GET /api/annual/monthly con serie mensual
+      y lista de transacciones del año
+- [ ] FRONTEND: Crear frontend/src/api/growth.ts con tipos y fetch functions
+- [ ] FRONTEND: Reemplazar Annual.tsx — vista anual (cards, gráfico barras
+      agrupadas con Cell, tabla con columna Fuente)
+- [ ] FRONTEND: Agregar vista mensual en Annual.tsx (selector año, cards,
+      gráfico líneas con Dot personalizado, lista movimientos)
+- [ ] FRONTEND: Eliminar annual.ts y BarChartComp.tsx si no tiene otros
+      consumidores (verificar con grep antes de eliminar)
+- [ ] QA: Verificar todos los criterios de aceptación
+- [ ] PASO FINAL: Actualizar CONTEXT.md y PLAN.md, mover spec, commit, push,
+      Slack
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 14 Abr 2026 (actualizado: Retornos por período sin campos legacy).
+> Refleja el estado REAL del código al 23 Abr 2026 (actualizado: Crecimiento de Patrimonio — vista anual/mensual híbrida).
 
 ---
 
@@ -433,7 +433,8 @@ InvestmentTracker/
 ### `/api/annual`
 | Método | Ruta | Descripción |
 |---|---|---|
-| GET | `/` | Tabla anual con métricas globales |
+| GET | `/` | Lógica híbrida: Transaction si hay datos ese año → `data_source=calculated`; AnnualSummary legacy → `data_source=legacy`. Items con patrimonio_inicio/fin, net_flow, gain, diff, pct_growth, pct_valorization. Metrics: total_invested, total_gained, gain_ratio, cagr. |
+| GET | `/monthly?year=` | Serie mensual de 12 meses para el año: patrimonio exacto de cada PortfolioSnapshot del mes, net_flow acumulado, valorización acumulada (vs base dic año anterior). Lista de transacciones del año con instrument_name. Summary: patrimonio_inicio/fin, net_flow_total, gain_total, pct_net_flow, pct_gain. |
 
 ### `/api/proventos`
 | Método | Ruta | Descripción |
@@ -552,9 +553,11 @@ el valor aumentó vs el período anterior; filas sin ningún valor ocultas; fila
 Nota: también existe endpoint legacy para historial de un instrumento (`/api/history/{id}`) usado internamente.
 **API:** `/api/history/monthly`, `/api/history/annual`, `/api/history/{id}`, `/api/history/compare`
 
-### Annual (`/annual`)
-Tabla anual con diff, gain, net_flow. Gráfico de barras apiladas.
-**API:** `/api/annual`
+### Annual (`/annual`) — Crecimiento de Patrimonio
+Dos vistas con toggle Anual/Mensual.
+**Vista Anual:** 4 cards de métricas (total aportado, ganado por mercado, CAGR, mejor año); gráfico de barras agrupadas (Recharts ComposedChart) con aportes netos + valorización por año y línea de patrimonio fin en eje Y derecho; tabla con columnas: Año | Inicio | Aportes netos | Valorización | Fin | Crecim. | % Valor. | Fuente (⚡ calculated / 📋 legacy). Lógica híbrida por año: usa Transaction si hay datos, AnnualSummary como fallback legacy.
+**Vista Mensual:** selector de año (DESC); 3 cards (patrimonio fin, aportes netos %, valorización %); gráfico de líneas (patrimonio total + valorización acumulada), Dot personalizado en meses con movimientos (verde=aporte, rojo=rescate); lista de movimientos del año.
+**API:** `/api/annual`, `/api/annual/monthly?year=`
 
 ### Proventos (`/proventos`)
 Tres tabs:
@@ -741,6 +744,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Rescate total de instrumento (ícono en tabla de posiciones para renta fija)
 - [x] Creación manual de instrumento con saldo inicial opcional (modal en Settings → Catálogo)
 - [x] Grilla pagado: celdas previstas en ámbar (*), totales de columna/fila incluyen previstos no pagados, edición pre-popula valor previsto
+- [x] Crecimiento de Patrimonio (/annual): vista anual + mensual con lógica híbrida Transaction/AnnualSummary, gráficos Recharts (barras agrupadas + líneas), indicador de fuente de dato (⚡/📋)
 
 ---
 

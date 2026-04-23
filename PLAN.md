@@ -236,7 +236,7 @@ GET  /api/import/history              # Historial de importaciones
 
 ### Fase 4 — Frontend resto de paginas
 14. [x] Histórico — matriz mensual/anual (instrumento × período, filtros, BRL/USD toggle)
-15. Analisis Anual
+15. [x] Crecimiento de Patrimonio (reemplaza Analisis Anual) — vista anual + mensual con lógica híbrida
 16. Proventos y dividendos
 17. Transacciones (formulario + lista)
 18. Configuracion (catalogo + importacion drag&drop)
