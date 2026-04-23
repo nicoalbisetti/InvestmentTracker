@@ -48,7 +48,10 @@ def _latest_positions_subquery(db: Session, month: Optional[str] = None):
                 MonthlyPosition.quantity.label("quantity"),
                 MonthlyPosition.date.label("pos_date"),
             )
-            .filter(MonthlyPosition.date == target_date)
+            .filter(
+                MonthlyPosition.date == target_date,
+                MonthlyPosition.custodian_override.is_(None),
+            )
             .subquery()
         )
     max_date_sub = (
@@ -56,6 +59,7 @@ def _latest_positions_subquery(db: Session, month: Optional[str] = None):
             MonthlyPosition.instrument_id.label("iid"),
             func.max(MonthlyPosition.date).label("mdate"),
         )
+        .filter(MonthlyPosition.custodian_override.is_(None))
         .group_by(MonthlyPosition.instrument_id)
         .subquery()
     )
@@ -75,6 +79,7 @@ def _latest_positions_subquery(db: Session, month: Optional[str] = None):
             (MonthlyPosition.instrument_id == max_date_sub.c.iid) &
             (MonthlyPosition.date == max_date_sub.c.mdate),
         )
+        .filter(MonthlyPosition.custodian_override.is_(None))
         .subquery()
     )
 
@@ -484,10 +489,11 @@ def copy_previous_month(payload: dict, db: Session = Depends(get_db)):
     if not active_inst_ids:
         return {"copied": 0}
 
-    # Positions in previous month
+    # Positions in previous month — exclude custodian_override rows (import auxiliaries)
     prev_positions = db.query(MonthlyPosition).filter(
         MonthlyPosition.date == prev_date,
-        MonthlyPosition.instrument_id.in_(active_inst_ids)
+        MonthlyPosition.instrument_id.in_(active_inst_ids),
+        MonthlyPosition.custodian_override.is_(None),
     ).all()
 
     # Positions already existing in target month

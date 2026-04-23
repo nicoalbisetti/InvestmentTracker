@@ -35,8 +35,19 @@ def get_kpis(db: Session = Depends(get_db)):
     if not latest:
         return {"error": "No hay datos disponibles"}
 
-    total_brl = latest.total_brl or 0
-    prev_total = (prev.total_brl or 0) if prev else 0
+    def month_totals(snap_date):
+        row = (
+            db.query(
+                func.sum(MonthlyPosition.balance_brl),
+                func.sum(MonthlyPosition.balance_usd),
+            )
+            .filter(MonthlyPosition.date == snap_date)
+            .one()
+        )
+        return (row[0] or 0, row[1] or 0)
+
+    total_brl, total_usd = month_totals(latest.date)
+    prev_total, _ = month_totals(prev.date) if prev else (0, 0)
     monthly_change_abs = total_brl - prev_total if prev_total else 0
     monthly_change_pct = latest.monthly_change_pct
 
@@ -48,8 +59,8 @@ def get_kpis(db: Session = Depends(get_db)):
         .first()
     )
     ytd_pct = None
-    if year_start and year_start.total_brl:
-        ytd_start = year_start.total_brl or 0
+    if year_start:
+        ytd_start, _ = month_totals(year_start.date)
         if ytd_start > 0:
             ytd_pct = (total_brl - ytd_start) / ytd_start
 
@@ -78,7 +89,6 @@ def get_kpis(db: Session = Depends(get_db)):
         if (m, inst_id) not in paid_set
     )
 
-    total_usd = latest.total_usd
     usd_rate = latest.usd_rate
 
     return {

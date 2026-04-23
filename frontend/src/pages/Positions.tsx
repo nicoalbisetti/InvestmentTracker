@@ -73,9 +73,10 @@ export default function Positions() {
   };
 
   useEffect(() => {
-    const month = priceMonth !== currentMonth ? priceMonth : undefined;
+    // Pass month explicitly when historical OR when filtering cerrado (to avoid showing stale latest-position data)
+    const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
     // In historical mode, don't filter by status — show all instruments that had positions then
-    const effectiveFilters = month ? { ...filters, status: undefined } : filters;
+    const effectiveFilters = priceMonth !== currentMonth ? { ...filters, status: undefined } : filters;
     const timer = setTimeout(() => load({ ...effectiveFilters, search: search || undefined, month }), 300);
     return () => clearTimeout(timer);
   }, [filters, search, priceMonth]);
@@ -90,7 +91,7 @@ export default function Positions() {
     if (isNaN(num)) { setEditing(null); return; }
     await client.patch(`/api/positions/${mpId}/balance`, { [field]: num });
     setEditing(null);
-    const month = priceMonth !== currentMonth ? priceMonth : undefined;
+    const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
     load({ ...filters, search: search || undefined, month });
   };
 
@@ -110,7 +111,7 @@ export default function Positions() {
     try {
       await rescateTotal(rescateTarget.id, rescateDate);
       setRescateTarget(null);
-      const month = priceMonth !== currentMonth ? priceMonth : undefined;
+      const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
       load({ ...filters, search: search || undefined, month });
     } catch (err: any) {
       setRescateError(err.message || 'Error al procesar el rescate.');
