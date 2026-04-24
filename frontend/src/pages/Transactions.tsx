@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { getTransactions, createTransaction, deleteTransaction } from '../api/transactions';
+import { getTransactions, createTransaction, updateTransaction, deleteTransaction } from '../api/transactions';
 import { getInstruments } from '../api/instruments';
 import Modal from '../components/ui/Modal';
+import InstrumentCombobox from '../components/ui/InstrumentCombobox';
 import { fmtBRL, fmtDate } from '../utils/formatters';
 
 const TYPE_OPTIONS = [
@@ -18,40 +19,105 @@ const TYPE_COLORS: Record<string, string> = {
   outro: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400',
 };
 
+const CUSTODIAN_OPTIONS = ['XP', 'SANTANDER', 'INTER', 'XP_INTERNATIONAL'];
+
+const EMPTY_FORM = { date: '', type: 'aplicacion', amount_brl: '', amount_usd: '', notes: '' };
+
 export default function Transactions() {
   const [data, setData] = useState<any>({ items: [], total: 0, pages: 1 });
   const [instruments, setInstruments] = useState<any[]>([]);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState({ instrument_id: '', date: '', type: 'aplicacion', amount_brl: '', amount_usd: '', notes: '' });
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [formInstrumentId, setFormInstrumentId] = useState<number | ''>('');
   const [saving, setSaving] = useState(false);
+  const [editingTx, setEditingTx] = useState<any | null>(null);
+
+  const [filters, setFilters] = useState({
+    custodian: '',
+    month_year: '',
+    type: '',
+    instrument_id: '' as number | '',
+  });
+
+  const hasActiveFilter = filters.custodian || filters.month_year || filters.type || filters.instrument_id !== '';
+
+  const buildParams = () => {
+    const p: Record<string, any> = { page, limit: 50 };
+    if (filters.custodian) p.custodian = filters.custodian;
+    if (filters.month_year) p.month_year = filters.month_year;
+    if (filters.type) p.type = filters.type;
+    if (filters.instrument_id !== '') p.instrument_id = filters.instrument_id;
+    return p;
+  };
 
   const load = () => {
     setLoading(true);
-    getTransactions({ page, limit: 50 }).then(setData).finally(() => setLoading(false));
+    getTransactions(buildParams()).then(setData).finally(() => setLoading(false));
   };
 
   useEffect(() => {
     getInstruments({ limit: 200 }).then((r: any) => setInstruments(r.items));
   }, []);
 
-  useEffect(() => { load(); }, [page]);
+  useEffect(() => { load(); }, [page, filters]);
+
+  const setFilter = (key: string, value: any) => {
+    setPage(1);
+    setFilters(f => ({ ...f, [key]: value }));
+  };
+
+  const clearFilters = () => {
+    setPage(1);
+    setFilters({ custodian: '', month_year: '', type: '', instrument_id: '' });
+  };
+
+  const openNew = () => {
+    setEditingTx(null);
+    setForm(EMPTY_FORM);
+    setFormInstrumentId('');
+    setShowModal(true);
+  };
+
+  const openEdit = (tx: any) => {
+    setEditingTx(tx);
+    setForm({
+      date: tx.date,
+      type: tx.type,
+      amount_brl: String(tx.amount_brl ?? ''),
+      amount_usd: tx.amount_usd ? String(tx.amount_usd) : '',
+      notes: tx.notes ?? '',
+    });
+    setFormInstrumentId(tx.instrument_id);
+    setShowModal(true);
+  };
+
+  const closeModal = () => {
+    setShowModal(false);
+    setEditingTx(null);
+    setForm(EMPTY_FORM);
+    setFormInstrumentId('');
+  };
 
   const handleSave = async () => {
-    if (!form.instrument_id || !form.date || !form.amount_brl) return;
+    if (!form.date || !form.amount_brl) return;
+    if (!editingTx && formInstrumentId === '') return;
     setSaving(true);
     try {
-      await createTransaction({
-        instrument_id: Number(form.instrument_id),
+      const payload = {
         date: form.date,
         type: form.type,
         amount_brl: Number(form.amount_brl),
         amount_usd: form.amount_usd ? Number(form.amount_usd) : undefined,
         notes: form.notes || undefined,
-      });
-      setShowModal(false);
-      setForm({ instrument_id: '', date: '', type: 'aplicacion', amount_brl: '', amount_usd: '', notes: '' });
+      };
+      if (editingTx) {
+        await updateTransaction(editingTx.id, payload);
+      } else {
+        await createTransaction({ ...payload, instrument_id: Number(formInstrumentId) });
+      }
+      closeModal();
       load();
     } finally {
       setSaving(false);
@@ -67,8 +133,52 @@ export default function Transactions() {
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <p className="text-sm text-gray-500">{data.total} transacciones</p>
-        <button className="btn-primary" onClick={() => setShowModal(true)}>+ Nueva Transacción</button>
+        <h1 className="text-lg font-semibold">Transacciones</h1>
+        <button className="btn-primary" onClick={openNew}>+ Nueva Transacción</button>
+      </div>
+
+      {/* Filters */}
+      <div className="card p-3 space-y-2">
+        <div className="flex flex-wrap gap-2 items-end">
+          <div className="flex flex-col gap-1 min-w-[140px]">
+            <label className="text-xs font-medium text-gray-500">Custodio</label>
+            <select className="input text-sm py-1.5" value={filters.custodian} onChange={e => setFilter('custodian', e.target.value)}>
+              <option value="">Todos</option>
+              {CUSTODIAN_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 min-w-[140px]">
+            <label className="text-xs font-medium text-gray-500">Mes/Año</label>
+            <input
+              type="month"
+              className="input text-sm py-1.5"
+              value={filters.month_year}
+              onChange={e => setFilter('month_year', e.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1 min-w-[140px]">
+            <label className="text-xs font-medium text-gray-500">Tipo</label>
+            <select className="input text-sm py-1.5" value={filters.type} onChange={e => setFilter('type', e.target.value)}>
+              <option value="">Todos los tipos</option>
+              {TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1 min-w-[200px]">
+            <label className="text-xs font-medium text-gray-500">Instrumento</label>
+            <InstrumentCombobox
+              value={filters.instrument_id}
+              onChange={v => setFilter('instrument_id', v)}
+              instruments={instruments}
+              placeholder="Todos los instrumentos"
+            />
+          </div>
+          {hasActiveFilter && (
+            <button className="btn-secondary text-sm py-1.5 self-end" onClick={clearFilters}>
+              Limpiar filtros
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-gray-400">{data.total} transacciones</p>
       </div>
 
       <div className="card p-0 overflow-hidden">
@@ -108,7 +218,10 @@ export default function Transactions() {
                   <td className="px-3 py-2.5 font-mono text-gray-500">{t.amount_usd ? `US$ ${t.amount_usd?.toLocaleString()}` : '—'}</td>
                   <td className="px-3 py-2.5 text-gray-500 max-w-[140px] truncate" title={t.notes}>{t.notes || '—'}</td>
                   <td className="px-3 py-2.5">
-                    <button onClick={() => handleDelete(t.id)} className="text-red-400 hover:text-red-600 text-xs">Eliminar</button>
+                    <div className="flex gap-2">
+                      <button onClick={() => openEdit(t)} className="text-indigo-400 hover:text-indigo-600 text-xs">Editar</button>
+                      <button onClick={() => handleDelete(t.id)} className="text-red-400 hover:text-red-600 text-xs">Eliminar</button>
+                    </div>
                   </td>
                 </tr>
               ))
@@ -126,17 +239,22 @@ export default function Transactions() {
         )}
       </div>
 
-      {/* New Transaction Modal */}
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Nueva Transacción" size="md">
+      <Modal open={showModal} onClose={closeModal} title={editingTx ? 'Editar Transacción' : 'Nueva Transacción'} size="md">
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium mb-1">Instrumento *</label>
-            <select className="input" value={form.instrument_id} onChange={e => setForm(f => ({ ...f, instrument_id: e.target.value }))}>
-              <option value="">Seleccionar...</option>
-              {instruments.map((i: any) => (
-                <option key={i.id} value={i.id}>{i.name} ({i.custodian})</option>
-              ))}
-            </select>
+            {editingTx ? (
+              <div className="input bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-400 cursor-not-allowed">
+                {editingTx.instrument_name}
+                <span className="ml-2 text-xs text-gray-400">({editingTx.instrument_custodian})</span>
+              </div>
+            ) : (
+              <InstrumentCombobox
+                value={formInstrumentId}
+                onChange={setFormInstrumentId}
+                instruments={instruments}
+              />
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -165,7 +283,7 @@ export default function Transactions() {
             <textarea className="input resize-none" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
           <div className="flex gap-3 pt-2">
-            <button className="btn-secondary flex-1" onClick={() => setShowModal(false)}>Cancelar</button>
+            <button className="btn-secondary flex-1" onClick={closeModal}>Cancelar</button>
             <button className="btn-primary flex-1" onClick={handleSave} disabled={saving}>
               {saving ? 'Guardando...' : 'Guardar'}
             </button>

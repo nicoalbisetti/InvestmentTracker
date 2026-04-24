@@ -111,6 +111,8 @@ def get_transactions(
     type: Optional[str] = None,
     date_from: Optional[str] = None,
     date_to: Optional[str] = None,
+    custodian: Optional[str] = Query(None),
+    month_year: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
@@ -124,6 +126,11 @@ def get_transactions(
         query = query.filter(Transaction.date >= date_from)
     if date_to:
         query = query.filter(Transaction.date <= date_to)
+    if custodian:
+        query = query.join(Instrument, Transaction.instrument_id == Instrument.id)
+        query = query.filter(Instrument.custodian == custodian)
+    if month_year:
+        query = query.filter(func.strftime('%Y-%m', Transaction.date) == month_year)
 
     total = query.count()
     txns = query.offset((page - 1) * limit).limit(limit).all()

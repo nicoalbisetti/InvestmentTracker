@@ -10,7 +10,7 @@ const NAV_ITEMS = [
   { to: '/',             label: 'Dashboard',      Icon: LayoutDashboard },
   { to: '/positions',    label: 'Posiciones',      Icon: Briefcase },
   { to: '/history',      label: 'Histórico',       Icon: CalendarDays },
-  { to: '/annual',       label: 'Anual',           Icon: BarChart2 },
+  { to: '/annual',       label: 'Análisis de Patrimonio', Icon: BarChart2 },
   { to: '/proventos',    label: 'Proventos',       Icon: Landmark },
   { to: '/equity-trades', label: 'Operaciones',     Icon: TrendingUp },
   { to: '/transactions', label: 'Transacciones',   Icon: ArrowLeftRight },
