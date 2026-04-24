@@ -1,0 +1,280 @@
+=============================================================================
+INVESTMENT TRACKER — MEJORAS CRUD TRANSACCIONES + RENOMBRE SIDEBAR
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+
+PASO 0 — Setup de seguimiento
+------------------------------
+a) Crear lista en ClickUp dentro del folder InvestmentTracker (folder_id="90177874339"):
+     clickup_create_list_in_folder(folder_id="90177874339", name="Feature — Mejoras CRUD Transacciones")
+
+b) Crear las siguientes tareas en esa lista:
+     T1: [Backend] Agregar filtro por custodio en GET /api/transactions
+     T2: [Frontend] Barra de filtros (custodio, mes/año, tipo, instrumento)
+     T3: [Frontend] Botón Editar + modal de edición de transacción
+     T4: [Frontend] Reemplazar <select> de instrumento por Combobox con búsqueda
+     T5: [Frontend] Renombrar label "Anual" → "Análisis de Patrimonio" en Sidebar
+
+c) Crear specs/pending/mejoras_crud_transacciones.txt (este archivo)
+     git add specs/pending/mejoras_crud_transacciones.txt
+     git commit -m "docs: add spec mejoras CRUD transacciones"
+     git push
+
+d) Crear TASKS.md con checkboxes para las 5 tareas.
+
+Recién después de completar el PASO 0 continuar con el desarrollo.
+
+CONVENCIÓN DURANTE EL DESARROLLO
+----------------------------------
+A medida que se completa cada tarea:
+  1. Marcarla en TASKS.md: [ ] -> [x]
+  2. Marcarla como completada en ClickUp:
+       clickup_update_task(task_id="<ID>", status="complete")
+
+
+=============================================================================
+1. RESUMEN
+=============================================================================
+
+Cuatro mejoras independientes sobre páginas existentes:
+
+  A) Filtros en CRUD Transacciones (/transactions)
+  B) Edición de transacciones existentes
+  C) Combobox con búsqueda para selector de instrumento
+  D) Renombre del label "Anual" en el sidebar
+
+
+=============================================================================
+2. T1 — BACKEND: FILTRO POR CUSTODIO EN GET /api/transactions
+=============================================================================
+
+Archivo: backend/app/routers/transactions.py
+
+El endpoint GET "" ya acepta instrument_id, type, date_from, date_to.
+Agregar parámetro adicional:
+
+  custodian: Optional[str] = Query(None)
+
+Implementación: si custodian está presente, hacer join con Instrument y filtrar:
+  query = query.join(Instrument, Transaction.instrument_id == Instrument.id)
+               .filter(Instrument.custodian == custodian)
+
+IMPORTANTE: el join solo se agrega si custodian no es None, para no romper
+consultas existentes.
+
+Agregar también: month_year: Optional[str] = Query(None)
+  Formato esperado: "YYYY-MM"
+  Implementación:
+    if month_year:
+        query = query.filter(func.strftime('%Y-%m', Transaction.date) == month_year)
+
+Los filtros date_from / date_to ya existen y se mantienen.
+El filtro month_year es alternativo/adicional a date_from/date_to.
+
+No hay cambio de schema ni migración. Solo cambio en el router.
+
+
+=============================================================================
+3. T2 — FRONTEND: BARRA DE FILTROS EN TRANSACTIONS
+=============================================================================
+
+Archivo: frontend/src/pages/Transactions.tsx
+
+Agregar estado de filtros:
+  const [filters, setFilters] = useState({
+    custodian: '',
+    month_year: '',   // formato "YYYY-MM", input type="month"
+    type: '',
+    instrument_id: '',
+  });
+
+La llamada a getTransactions debe incluir los filtros activos (omitir vacíos):
+  getTransactions({ page, limit: 50, ...activeFilters })
+
+Resetear a page=1 al cambiar cualquier filtro.
+
+UI: fila de filtros encima de la tabla (misma fila o debajo del header),
+usando la clase "input" existente. Diseño compacto, en línea.
+
+Campos de filtro:
+  - Custodio: <select> con opciones ["", "XP", "SANTANDER", "INTER", "XP_INTERNATIONAL"]
+              Label: "Custodio". Valor vacío = "Todos".
+  - Mes/Año:  <input type="month"> — genera valor "YYYY-MM" automáticamente.
+              Label: "Mes/Año".
+  - Tipo:     <select> con TYPE_OPTIONS existentes + opción vacía "Todos los tipos".
+              Ya existe la constante TYPE_OPTIONS.
+  - Instrumento: ver T4 (Combobox). Cuando se selecciona un instrumento en el
+                 filtro, enviar instrument_id al backend.
+
+Botón "Limpiar filtros" que resetea todos a vacío. Solo visible si hay
+algún filtro activo.
+
+Mostrar el conteo de resultados: "X transacciones" debajo de los filtros.
+
+
+=============================================================================
+4. T3 — FRONTEND: EDICIÓN DE TRANSACCIONES
+=============================================================================
+
+Archivo: frontend/src/pages/Transactions.tsx
+
+El backend ya tiene PUT /api/transactions/{id}.
+El api/transactions.ts ya exporta updateTransaction(id, data).
+
+Cambios en la tabla:
+  - Columna "Acciones" actualmente solo tiene "Eliminar".
+  - Agregar botón "Editar" antes de "Eliminar".
+
+Al hacer click en Editar:
+  - Abrir el mismo Modal existente pero en modo edición.
+  - Pre-cargar todos los campos del formulario con los datos de la transacción.
+  - El título del modal cambia a "Editar Transacción".
+  - El botón de guardar llama a updateTransaction(editingId, data) en lugar
+    de createTransaction(data).
+  - Al éxito: cerrar modal, refrescar tabla.
+
+Estado adicional necesario:
+  const [editingTx, setEditingTx] = useState<any | null>(null);
+  // null = modo crear, objeto = modo editar
+
+Lógica handleSave:
+  if (editingTx) {
+    await updateTransaction(editingTx.id, { ...form fields });
+  } else {
+    await createTransaction({ ...form fields });
+  }
+
+Al cerrar el modal: resetear editingTx a null y limpiar el formulario.
+
+NOTA: El campo instrument_id NO debe ser editable en modo edición — mostrar
+el nombre del instrumento como texto estático, no como selector. Cambiar el
+instrumento de una transacción existente rompería la lógica de recálculo de
+posiciones. Si el usuario necesita cambiar el instrumento, debe eliminar y
+recrear la transacción.
+
+
+=============================================================================
+5. T4 — FRONTEND: COMBOBOX CON BÚSQUEDA PARA SELECTOR DE INSTRUMENTO
+=============================================================================
+
+El selector de instrumento aparece en DOS lugares:
+  a) El formulario de nueva/edición de transacción (campo "Instrumento")
+  b) El filtro de instrumento en la barra de filtros
+
+Crear componente reutilizable:
+  frontend/src/components/ui/InstrumentCombobox.tsx
+
+Props:
+  value: number | ''
+  onChange: (id: number | '') => void
+  instruments: Array<{ id: number; name: string; custodian: string }>
+  placeholder?: string        // default: "Buscar instrumento..."
+  disabled?: boolean
+
+Implementación con shadcn/ui Command + Popover:
+  - Botón trigger que muestra el nombre del instrumento seleccionado,
+    o el placeholder si ninguno seleccionado.
+  - Al hacer click: abrir Popover con un Command (input de búsqueda +
+    lista de resultados).
+  - Filtrado: case-insensitive sobre name y custodian.
+  - Cada ítem muestra: nombre del instrumento (bold) + custodian (gris, más pequeño).
+  - Selección: al hacer click en un ítem, cerrar popover y llamar onChange.
+  - Opción de limpiar: si hay valor seleccionado, mostrar ícono X para
+    deseleccionar (llama onChange con '').
+  - Máximo 200px de alto en la lista, scrollable.
+  - Ancho del popover: mismo ancho que el trigger (w-full).
+
+Usar este componente en:
+  1. Formulario de transacción: reemplaza el <select> de instrument_id.
+  2. Filtro de instrumento en la barra de filtros.
+
+Verificar que shadcn/ui Command y Popover estén disponibles; si no,
+instalar con: npx shadcn-ui@latest add command popover
+
+
+=============================================================================
+6. T5 — FRONTEND: RENOMBRAR LABEL EN SIDEBAR
+=============================================================================
+
+Archivo: frontend/src/components/layout/Sidebar.tsx
+
+En el array NAV_ITEMS, cambiar:
+  { to: '/annual', label: 'Anual', Icon: BarChart2 }
+por:
+  { to: '/annual', label: 'Análisis de Patrimonio', Icon: BarChart2 }
+
+NOTA: El título interno de Annual.tsx ya dice "Crecimiento de Patrimonio" —
+no cambiarlo, solo el label del sidebar.
+
+Verificar que en modo colapsado (solo ícono) no haya regresión visual.
+
+
+=============================================================================
+7. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+T1:
+  [ ] GET /api/transactions?custodian=XP devuelve solo transacciones de
+      instrumentos con custodian="XP"
+  [ ] GET /api/transactions?month_year=2025-03 devuelve solo transacciones
+      del mes 2025-03
+  [ ] Sin parámetros: comportamiento idéntico al anterior
+
+T2:
+  [ ] Filtrar por custodio, mes/año, tipo e instrumento de forma individual
+      y combinada muestra resultados correctos
+  [ ] Al cambiar un filtro, la página se resetea a 1
+  [ ] Botón "Limpiar filtros" solo visible cuando hay algún filtro activo
+  [ ] Conteo "X transacciones" visible debajo de los filtros
+
+T3:
+  [ ] Click en "Editar" abre modal pre-cargado con datos de la transacción
+  [ ] El campo instrumento se muestra como texto estático (no editable)
+      en modo edición
+  [ ] Guardar en modo edición llama PUT y refresca la tabla
+  [ ] Al cancelar en modo edición, el form queda limpio para el próximo "Nueva"
+
+T4:
+  [ ] El combobox filtra en tiempo real al escribir (nombre y custodian)
+  [ ] Se puede seleccionar un instrumento por nombre parcial
+  [ ] El ícono X limpia la selección
+  [ ] Funciona tanto en el formulario como en el filtro
+
+T5:
+  [ ] Sidebar muestra "Análisis de Patrimonio" para la ruta /annual
+  [ ] En modo colapsado (solo ícono) no hay regresión visual
+
+
+=============================================================================
+PASO FINAL — Al terminar toda la implementación
+=============================================================================
+
+a) git add -A
+   git commit -m "feat: mejoras CRUD transacciones
+
+   - Filtros por custodio, mes/año, tipo e instrumento en Transactions
+   - Edición de transacciones (modal pre-cargado, PUT endpoint existente)
+   - Combobox con búsqueda para selector de instrumento (reutilizable)
+   - Renombre label sidebar Anual -> Analisis de Patrimonio"
+   git push
+
+b) Mover spec:
+     mv specs/pending/mejoras_crud_transacciones.txt specs/done/
+     git add -A
+     git commit -m "docs: move spec mejoras_crud_transacciones to done"
+     git push
+
+c) Actualizar CONTEXT.md:
+   - En la sección Transactions: agregar que soporta filtros por custodio,
+     mes/año, tipo e instrumento, y que permite edición de transacciones.
+   - Mencionar el componente InstrumentCombobox en
+     frontend/src/components/ui/ como reutilizable.
+   - En la sección Sidebar/navegación: actualizar label de /annual a
+     "Análisis de Patrimonio".
+
+d) Actualizar PLAN.md:
+   - En Fase 4, marcar como [x] "Transacciones (formulario + lista)"
+     con nota: filtros avanzados, edición, combobox de instrumento.
