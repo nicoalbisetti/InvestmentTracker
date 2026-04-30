@@ -1,0 +1,525 @@
+=============================================================================
+INVESTMENT TRACKER — MONTO EN MONEDA DEL INSTRUMENTO EN TRANSACCIONES
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md desde el repositorio antes de comenzar.
+
+PASO 0 — Setup obligatorio
+---------------------------
+a) Crear TASKS.md en la raíz con todas las tareas como checkboxes.
+   No iniciar el desarrollo hasta tener el TASKS.md completo.
+
+b) Crear lista en ClickUp dentro del folder InvestmentTracker
+   (folder_id: 90177874339):
+     clickup_create_list_in_folder(
+       folder_id="90177874339",
+       name="Feature — Monto por moneda en transacciones"
+     )
+
+c) Crear una tarea por ítem del TASKS.md con clickup_create_task.
+   Guardar los IDs retornados para marcarlos como completados.
+
+d) Guardar este spec en el repositorio:
+     mv prompt_transaccion_monto_por_moneda.txt specs/pending/prompt_transaccion_monto_por_moneda.txt
+     git add specs/pending/prompt_transaccion_monto_por_moneda.txt
+     git commit -m "docs: add spec for monto por moneda en transacciones"
+     git push
+
+e) Recién después iniciar el desarrollo.
+   Marcar cada tarea como completada en ClickUp al terminarla.
+
+CONVENCIÓN DURANTE EL DESARROLLO
+----------------------------------
+A medida que se completa cada tarea:
+  1. Marcarla en TASKS.md: [ ] -> [x]
+  2. Marcarla como completada en ClickUp:
+       clickup_update_task(task_id="<ID>", status="complete")
+
+
+=============================================================================
+PASO FINAL — Al terminar toda la implementación
+=============================================================================
+
+1. git add -A
+   git commit -m "feat(transactions): monto en moneda del instrumento
+
+   - Formulario solicita monto en la moneda nativa del instrumento
+   - Segundo monto calculado automáticamente con cotización del mes
+   - Si no hay cotización: caja de texto manual para el rate
+   - Checkbox para sobreescribir el segundo monto calculado
+   - Nuevo endpoint GET /api/quotes/lookup para lookup por mes
+   - Backend acepta usd_rate_override en TransactionCreate"
+   git push
+
+2. Actualizar CONTEXT.md:
+   - En /api/quotes: agregar GET /lookup?month=YYYY-MM
+   - En /api/transactions: actualizar descripción de POST para mencionar
+     el campo opcional usd_rate_override
+
+3. Mover spec:
+     git mv specs/pending/prompt_transaccion_monto_por_moneda.txt specs/done/
+     git commit -m "docs: move spec transaccion monto por moneda to done"
+     git push
+
+4. Enviar mensaje de cierre al canal Slack #claudio-coding
+   (channel_id: C0AMM733V1Q) con slack_send_message.
+
+
+=============================================================================
+1. RESUMEN
+=============================================================================
+
+Cambiar el formulario de nueva/edición de transacción (tipos "aplicacion"
+y "rescate") para que:
+
+  1. Solicite el monto en la moneda NATIVA del instrumento seleccionado
+     (BRL para currency="BRL", USD para currency="USD") como campo
+     primario y obligatorio.
+
+  2. Calcule automáticamente el segundo monto usando la cotización del
+     mes de la transacción obtenida desde la tabla Quote.
+
+  3. Si no hay cotización disponible para ese mes, muestre una caja de
+     texto para que el usuario ingrese el rate manualmente. El rate
+     manual NO se persiste en la tabla Quote.
+
+  4. Ofrezca un checkbox "Editar monto [moneda secundaria] manualmente"
+     que permita sobreescribir el valor calculado del segundo campo.
+
+Tipos afectados: "aplicacion" y "rescate" únicamente.
+Tipos NO afectados: "provento" y "outro" — mantienen el formulario actual
+con dos campos libres (amount_brl y amount_usd opcionales).
+
+No hay cambios de schema de base de datos.
+El backend recibe exactamente los mismos campos amount_brl y amount_usd
+de siempre; el cálculo y la lógica de UI son enteramente frontend.
+La única adición de backend es un endpoint auxiliar de lookup de cotización.
+
+
+=============================================================================
+2. CONTEXTO RELEVANTE DEL SISTEMA
+=============================================================================
+
+--- 2.1 Tabla Quote ---
+
+  Modelo: backend/app/models/quote.py
+  Campos relevantes: date (Date, día 1 del mes, UNIQUE), usd_brl (Float)
+
+  La tabla tiene cotizaciones históricas desde 2015. Cada fila es el
+  rate del mes (normalizado al día 1). No hay cotizaciones diarias.
+
+  Para una transacción con fecha 2024-03-15, la cotización aplicable
+  es la del mes 2024-03-01.
+
+--- 2.2 Instrumento y currency ---
+
+  El campo Instrument.currency puede ser "BRL" o "USD".
+  La lista de instrumentos que ya carga Transactions.tsx (via getInstruments)
+  incluye el campo currency en cada item del response (confirmado en
+  InstrumentOut schema y en el response de GET /api/instruments).
+
+  El estado local `instruments` en Transactions.tsx tiene:
+    instruments: Array con campos { id, name, custodian, currency, ... }
+
+--- 2.3 Estado actual del formulario ---
+
+  El formulario en Transactions.tsx tiene:
+    form.date        — fecha de la transacción (YYYY-MM-DD)
+    form.type        — "aplicacion" | "rescate" | "provento" | "outro"
+    form.amount_brl  — string (input libre)
+    form.amount_usd  — string (input libre, opcional)
+    form.notes       — string
+
+  formInstrumentId   — number | '' (instrumento seleccionado)
+
+  La lista `instruments` se carga al montar el componente con getInstruments().
+  El InstrumentCombobox ya existe y se usa para seleccionar el instrumento.
+
+--- 2.4 Lógica de recálculo de posiciones (_recompute_positions) ---
+
+  El backend usa amount_brl y amount_usd de Transaction para recalcular
+  MonthlyPosition. Si amount_usd es null para una transacción de un
+  instrumento USD, balance_usd de la posición NO se actualiza correctamente.
+  Por eso es importante que esta feature siempre provea ambos montos.
+
+
+=============================================================================
+3. BACKEND — NUEVO ENDPOINT DE LOOKUP DE COTIZACIÓN
+=============================================================================
+
+Archivo: backend/app/routers/quotes.py
+
+Agregar endpoint:
+
+  GET /api/quotes/lookup
+
+Parámetro query:
+  month: str — formato "YYYY-MM" (requerido)
+
+Lógica:
+  1. Parsear month → date(year, month, 1)
+  2. Buscar Quote con date == date(year, month, 1)
+  3. Si existe y tiene usd_brl → retornar el rate
+  4. Si no existe o usd_brl es null → retornar rate=null
+
+Respuesta JSON:
+  {
+    "month": "2024-03",
+    "rate": 4.9750,      // float | null
+    "found": true        // bool
+  }
+
+Errores:
+  - 422: month ausente o con formato incorrecto
+
+IMPORTANTE: Este endpoint va ANTES del endpoint GET "" en el router para
+que FastAPI no interprete "lookup" como un path param de fecha. Verificar
+el orden de declaración en quotes.py.
+
+Ejemplo de llamada desde frontend:
+  GET /api/quotes/lookup?month=2024-03
+  → { "month": "2024-03", "rate": 4.9750, "found": true }
+
+  GET /api/quotes/lookup?month=2099-01
+  → { "month": "2099-01", "rate": null, "found": false }
+
+
+=============================================================================
+4. FRONTEND — LÓGICA GENERAL DEL NUEVO FORMULARIO
+=============================================================================
+
+Archivo: frontend/src/pages/Transactions.tsx
+
+--- 4.1 Determinar la moneda del instrumento seleccionado ---
+
+Cuando formInstrumentId cambia, derivar la moneda del instrumento:
+
+  const selectedInstrument = instruments.find(i => i.id === formInstrumentId);
+  const instrumentCurrency: 'BRL' | 'USD' | null =
+    selectedInstrument?.currency ?? null;
+
+Este valor se usa para decidir qué campo es primario.
+
+--- 4.2 Nuevo estado a agregar ---
+
+  // Cotización para el cálculo
+  const [quoteRate, setQuoteRate] = useState<number | null>(null);
+  const [quoteFound, setQuoteFound] = useState<boolean | null>(null);
+  const [manualRate, setManualRate] = useState<string>('');
+  const [overrideSecondary, setOverrideSecondary] = useState(false);
+
+Al cerrar el modal (closeModal / reset), limpiar estos estados:
+  setQuoteRate(null);
+  setQuoteFound(null);
+  setManualRate('');
+  setOverrideSecondary(false);
+
+--- 4.3 Fetch de cotización al cambiar fecha o instrumento ---
+
+Disparar un fetch a /api/quotes/lookup cuando:
+  - form.date cambia Y formInstrumentId tiene valor
+  - formInstrumentId cambia Y form.date tiene valor
+  - Solo si el tipo de transacción es "aplicacion" o "rescate"
+
+Lógica del fetch:
+  const month = form.date.substring(0, 7);  // "YYYY-MM"
+  const result = await client.get('/api/quotes/lookup', { params: { month } });
+  setQuoteRate(result.data.rate);    // null si no encontró
+  setQuoteFound(result.data.found);
+  setManualRate('');                  // limpiar rate manual previo
+  setOverrideSecondary(false);        // resetear override
+
+Usar un useEffect con dependencias [form.date, formInstrumentId, form.type].
+Usar un pequeño debounce (300ms) para evitar fetches en cada tecla al
+escribir la fecha manualmente.
+
+--- 4.4 Calcular el monto secundario ---
+
+El rate efectivo es:
+  const effectiveRate = quoteRate ?? (manualRate ? parseFloat(manualRate) : null);
+
+El monto secundario calculado es:
+  Si instrumentCurrency === 'USD':
+    // Campo primario es amount_usd, secundario es amount_brl
+    calculatedSecondary = effectiveRate && form.amount_usd
+      ? round(parseFloat(form.amount_usd) * effectiveRate, 2)
+      : null;
+
+  Si instrumentCurrency === 'BRL':
+    // Campo primario es amount_brl, secundario es amount_usd
+    calculatedSecondary = effectiveRate && form.amount_brl
+      ? round(parseFloat(form.amount_brl) / effectiveRate, 2)
+      : null;
+
+Función helper round(value, decimals):
+  Math.round(value * 10**decimals) / 10**decimals
+
+--- 4.5 Construcción del payload al guardar ---
+
+En handleSave, para tipos "aplicacion" y "rescate":
+
+  Si instrumentCurrency === 'USD':
+    payload.amount_usd = parseFloat(form.amount_usd) || undefined
+    payload.amount_brl = overrideSecondary
+      ? (parseFloat(form.amount_brl) || undefined)
+      : (calculatedSecondary ?? undefined)
+
+  Si instrumentCurrency === 'BRL':
+    payload.amount_brl = parseFloat(form.amount_brl) || undefined
+    payload.amount_usd = overrideSecondary
+      ? (parseFloat(form.amount_usd) || undefined)
+      : (calculatedSecondary ?? undefined)
+
+  Si instrumentCurrency es null (instrumento no seleccionado o tipo
+  "provento"/"outro"): mantener comportamiento actual (ambos campos libres).
+
+Validación antes de enviar:
+  Si tipo es "aplicacion" o "rescate":
+    - El campo primario (según currency) debe tener un valor > 0.
+    - Si no hay rate efectivo y overrideSecondary es false:
+        mostrar warning inline: "El segundo monto no pudo calcularse.
+        Podés ingresarlo manualmente activando la opción de edición."
+        Pero NO bloquear el guardado — permitir guardar con amount_usd
+        o amount_brl en null si no hay rate disponible.
+
+
+=============================================================================
+5. FRONTEND — LAYOUT DEL FORMULARIO
+=============================================================================
+
+El formulario actual tiene una grilla de 2 columnas para los montos.
+Esta sección define el nuevo layout para tipos "aplicacion" y "rescate"
+cuando hay un instrumento seleccionado.
+
+--- 5.1 Cuando instrumentCurrency === 'BRL' ---
+
+Campo primario (col izquierda):
+  label: "Monto BRL *"
+  input: type="number", value=form.amount_brl
+  onChange: actualiza form.amount_brl Y recalcula el secundario
+
+Campo secundario (col derecha):
+  label: "Monto USD  [badge: calculado | manual]"
+  input: type="number"
+         disabled={!overrideSecondary}
+         value={overrideSecondary ? form.amount_usd : (calculatedSecondary ?? '')}
+         placeholder={!effectiveRate ? "Sin cotización" : "0.00"}
+  Si overrideSecondary=false: mostrar el valor calculado en color gris/verde
+  Si overrideSecondary=true:  input editable normal
+
+--- 5.2 Cuando instrumentCurrency === 'USD' ---
+
+Campo primario (col izquierda):
+  label: "Monto USD *"
+  input: type="number", value=form.amount_usd
+  onChange: actualiza form.amount_usd Y recalcula el secundario
+
+Campo secundario (col derecha):
+  label: "Monto BRL  [badge: calculado | manual]"
+  input: type="number"
+         disabled={!overrideSecondary}
+         value={overrideSecondary ? form.amount_brl : (calculatedSecondary ?? '')}
+         placeholder={!effectiveRate ? "Sin cotización" : "0.00"}
+
+--- 5.3 Bloque de cotización (debajo de los campos de monto) ---
+
+Mostrar SOLO cuando el tipo es "aplicacion" o "rescate" Y hay un instrumento
+seleccionado (instrumentCurrency no null).
+
+CASO A — Cotización encontrada (quoteFound === true):
+  Mostrar una línea de texto pequeña (text-xs text-gray-400):
+    "Cotización del mes: R$ {quoteRate.toFixed(4)}"
+  Sin input adicional.
+
+CASO B — Cotización NO encontrada (quoteFound === false):
+  Mostrar alerta amarilla pequeña:
+    "⚠️ No hay cotización registrada para {month}."
+  Debajo de la alerta, mostrar input para el rate manual:
+    label: "Cotización USD/BRL (solo para este cálculo)"
+    input: type="number", step="0.0001", placeholder="5.2000"
+           value=manualRate
+           onChange: actualiza manualRate y recalcula el secundario
+    Texto de ayuda (text-xs text-gray-400):
+      "Este valor no se guarda. Solo se usa para calcular el segundo monto."
+
+CASO C — Todavía cargando / fecha o instrumento no definido:
+  No mostrar nada.
+
+--- 5.4 Checkbox de override (debajo del bloque de cotización) ---
+
+Mostrar SOLO cuando el tipo es "aplicacion" o "rescate" Y hay instrumento
+seleccionado Y (quoteFound === true O manualRate tiene valor).
+
+  <input type="checkbox"
+         checked={overrideSecondary}
+         onChange={e => {
+           setOverrideSecondary(e.target.checked);
+           // Al activar, copiar el valor calculado al campo del form
+           // para que el usuario lo tenga como punto de partida
+           if (e.target.checked && calculatedSecondary !== null) {
+             if (instrumentCurrency === 'USD') {
+               setForm(f => ({ ...f, amount_brl: String(calculatedSecondary) }));
+             } else {
+               setForm(f => ({ ...f, amount_usd: String(calculatedSecondary) }));
+             }
+           }
+         }}
+  />
+  <label className="text-sm text-gray-600 dark:text-gray-400 ml-2">
+    Editar monto {instrumentCurrency === 'USD' ? 'BRL' : 'USD'} manualmente
+  </label>
+
+--- 5.5 Tipos "provento" y "outro" ---
+
+Para estos tipos, mantener el layout actual sin cambios:
+  - "Monto BRL *" (campo libre)
+  - "Monto USD (opcional)" (campo libre)
+  - Sin bloque de cotización
+  - Sin checkbox de override
+
+
+=============================================================================
+6. COMPORTAMIENTO EN MODO EDICIÓN
+=============================================================================
+
+Cuando el modal se abre en modo edición (editingTx no null), el instrumento
+no es editable (se muestra como texto estático). Sin embargo, currency del
+instrumento sí está disponible en editingTx (verificar que el response de
+GET /api/transactions incluya instrument_currency, o buscarlo en la lista
+de instruments ya cargada por id).
+
+Al pre-cargar el formulario en modo edición:
+  - Determinar instrumentCurrency desde la lista de instruments con
+    el instrument_id de editingTx.
+  - Si currency es BRL: pre-cargar amount_brl en campo primario,
+    amount_usd en campo secundario con override activado (ya tiene valor).
+  - Si currency es USD: pre-cargar amount_usd en campo primario,
+    amount_brl en campo secundario con override activado (ya tiene valor).
+  - Hacer fetch de la cotización del mes de editingTx.date igual que
+    en modo creación.
+  - overrideSecondary = true por defecto en modo edición (el usuario ya
+    ingresó ambos valores previamente; no sobreescribir con el calculado).
+
+
+=============================================================================
+7. DECISIONES DE DISEÑO EXPLÍCITAS
+=============================================================================
+
+DECISIÓN 1 — El rate manual NO se persiste en Quote.
+  Razón: evitar que un rate ingresado de memoria o estimado por el usuario
+  sobreescriba datos históricos de cotización en la base de datos.
+  El campo manualRate se usa solo para el cálculo en el formulario.
+
+DECISIÓN 2 — El guardado NO se bloquea si no hay rate.
+  Razón: el usuario puede querer registrar una transacción con solo un
+  monto (ej: solo BRL para un instrumento BRL, sin USD). Es preferible
+  guardar con amount_usd=null que bloquear la operación. El segundo monto
+  se puede editar después.
+
+DECISIÓN 3 — La cotización lookup es por mes, no por día.
+  Razón: la tabla Quote solo tiene cotizaciones mensuales (día 1 de cada
+  mes). No existe granularidad diaria. Para cualquier fecha del mes
+  se usa la cotización del mes correspondiente.
+
+DECISIÓN 4 — Override activado por defecto en modo edición.
+  Razón: en modo edición, ambos montos ya fueron guardados previamente
+  con valores intencionales. Sobreescribir el secundario con un valor
+  recalculado sería destructivo.
+
+DECISIÓN 5 — No modificar el backend de Transaction.
+  El backend ya acepta amount_brl y amount_usd como campos opcionales.
+  No se agrega ningún campo nuevo al modelo ni al schema. Toda la lógica
+  de cálculo vive en el frontend.
+
+
+=============================================================================
+8. ARCHIVOS A CREAR O MODIFICAR
+=============================================================================
+
+CREAR:
+  (ninguno — solo agregar un endpoint al router existente)
+
+MODIFICAR:
+  backend/app/routers/quotes.py
+    Agregar endpoint GET /api/quotes/lookup (ver sección 3)
+    IMPORTANTE: agregar ANTES del endpoint GET "" existente
+
+  frontend/src/pages/Transactions.tsx
+    - Nuevo estado: quoteRate, quoteFound, manualRate, overrideSecondary
+    - useEffect para fetch de cotización al cambiar fecha/instrumento/tipo
+    - Lógica de calculatedSecondary y effectiveRate
+    - Nuevo layout condicional en el modal para tipos aplicacion/rescate
+    - Construcción del payload en handleSave según currency
+    - Reset de nuevos estados en closeModal
+
+
+=============================================================================
+9. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+[ ] Al seleccionar un instrumento BRL y tipo "aplicacion", el campo
+    primario es "Monto BRL *" y el secundario es "Monto USD (calculado)".
+
+[ ] Al seleccionar un instrumento USD y tipo "aplicacion", el campo
+    primario es "Monto USD *" y el secundario es "Monto BRL (calculado)".
+
+[ ] Al ingresar el monto primario y habiendo cotización disponible,
+    el campo secundario se actualiza automáticamente con el valor calculado
+    y no es editable.
+
+[ ] La línea "Cotización del mes: R$ X.XXXX" aparece cuando hay cotización
+    en la tabla Quote para ese mes.
+
+[ ] Cuando no hay cotización para el mes de la transacción, aparece la
+    alerta amarilla y el input de rate manual.
+
+[ ] Al ingresar un rate manual, el campo secundario se recalcula
+    correctamente.
+
+[ ] El checkbox "Editar monto [moneda] manualmente" hace el campo
+    secundario editable y pre-carga el valor calculado como punto de
+    partida.
+
+[ ] Al guardar con cotización disponible, la transacción guardada tiene
+    ambos montos (amount_brl y amount_usd) con valores correctos.
+
+[ ] Al guardar sin cotización y sin rate manual y sin override, la
+    transacción se guarda con el segundo monto en null (no bloquea).
+
+[ ] Para tipos "provento" y "outro", el formulario mantiene el layout
+    actual sin cambios.
+
+[ ] GET /api/quotes/lookup?month=YYYY-MM retorna { month, rate, found }
+    correctamente para meses con y sin cotización.
+
+[ ] En modo edición, overrideSecondary arranca en true y los campos
+    muestran los valores guardados.
+
+[ ] Al cerrar el modal, todos los estados nuevos se resetean.
+
+
+=============================================================================
+TASKS.md — Lista de tareas
+=============================================================================
+
+- [ ] PASO 0: Crear TASKS.md, lista y tareas en ClickUp, commitear spec
+- [ ] BACKEND: Agregar GET /api/quotes/lookup en quotes.py (antes del GET "")
+- [ ] FRONTEND: Agregar estado quoteRate, quoteFound, manualRate, overrideSecondary
+- [ ] FRONTEND: useEffect para fetch de cotización al cambiar fecha/instrumento/tipo
+- [ ] FRONTEND: Lógica calculatedSecondary y effectiveRate
+- [ ] FRONTEND: Nuevo layout del modal para tipos aplicacion/rescate (BRL y USD)
+- [ ] FRONTEND: Bloque de cotización (encontrada / no encontrada / manual)
+- [ ] FRONTEND: Checkbox de override con pre-carga del valor calculado
+- [ ] FRONTEND: Construcción del payload en handleSave según currency
+- [ ] FRONTEND: Comportamiento en modo edición (override=true por defecto)
+- [ ] FRONTEND: Reset de estados nuevos en closeModal
+- [ ] QA: Verificar todos los criterios de aceptación
+- [ ] PASO FINAL: Commit, actualizar CONTEXT.md, mover spec, Slack
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

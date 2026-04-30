@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 23 Abr 2026 (actualizado: Mejoras endpoint update-usd-rate — criterio currency, persistencia usd_rate, sync_snapshot, response desglosado).
+> Refleja el estado REAL del código al 23 Abr 2026 (actualizado: Monto por moneda en transacciones — campo primario por currency, calculado secundario, lookup cotización, override manual).
 
 ---
 
@@ -459,7 +459,7 @@ InvestmentTracker/
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/?instrument_id&type&date_from&date_to&custodian&month_year&page&limit` | Lista paginada. `custodian` filtra por join a Instrument. `month_year` ("YYYY-MM") filtra por mes. |
-| POST | `/` | Crea transacción + recalcula monthly_positions |
+| POST | `/` | Crea transacción + recalcula monthly_positions. Acepta `amount_brl` y `amount_usd` opcionales; el frontend calcula el secundario con cotización del mes. |
 | PUT | `/{txn_id}` | Actualiza + recalcula |
 | DELETE | `/{txn_id}` | Elimina + recalcula |
 
@@ -516,6 +516,7 @@ InvestmentTracker/
 ### `/api/quotes`
 | Método | Ruta | Descripción |
 |---|---|---|
+| GET | `/lookup?month=YYYY-MM` | Retorna `{ month, rate, found }` con la cotización USD/BRL almacenada para ese mes. `rate=null` y `found=false` si no existe. |
 | GET | `/?date_from&date_to` | Lista de cotizaciones |
 | POST | `/` | Upsert cotización (usd_brl, bvmf3_price) |
 
@@ -752,6 +753,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Grilla pagado: celdas previstas en ámbar (*), totales de columna/fila incluyen previstos no pagados, edición pre-popula valor previsto
 - [x] Crecimiento de Patrimonio (/annual): vista anual + mensual con lógica híbrida Transaction/AnnualSummary, gráficos Recharts (barras agrupadas + líneas), indicador de fuente de dato (⚡/📋)
 - [x] Mejoras CRUD Transacciones: filtros por custodio/mes-año/tipo/instrumento, edición de transacciones (modal pre-cargado, instrumento estático), combobox de instrumento reutilizable (InstrumentCombobox), label sidebar /annual → "Análisis de Patrimonio"
+- [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
 
 ---
 
