@@ -405,7 +405,7 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/kpis` | total_brl, ytd_pct, monthly_change, proventos_ytd, proventos_projection |
 | GET | `/evolution?range=1y\|3y\|5y\|all&currency=BRL\|USD` | Serie histórica del portfolio |
-| GET | `/distribution` | Distribución por tipo y custodio |
+| GET | `/distribution` | Distribución por tipo, custodio y localización. Response: `{ by_type, by_custodian, by_location }`. `by_location` agrupa por `Instrument.location` (null → "brasil"). |
 | GET | `/evolution-by-type?range=...` | Evolución apilada por tipo |
 | GET | `/benchmarks?range=...` | CDI/IPCA desde BCB (cacheado en market_rates) |
 | GET | `/maturities` | Posiciones agrupadas por mes de vencimiento |
@@ -539,7 +539,7 @@ InvestmentTracker/
 ### Dashboard (`/`)
 Banda ticker animada (TickerBand) al tope con precio y variación del día de instrumentos accion/fii.
 KPIs (total cartera, variación del mes, YTD, proventos pagados + proyección), gráfico de evolución,
-distribución por tipo/custodio, top/bottom 5, vencimientos.
+distribución por tipo/custodio/localización (tres donuts con porcentaje en tooltip y leyenda), top/bottom 5, vencimientos.
 **API:** `/api/dashboard/kpis`, `/evolution`, `/distribution`, `/top-bottom`, `/benchmarks`, `/maturities`, `/api/ticker/quotes`
 
 ### Positions (`/positions`)
@@ -754,6 +754,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Crecimiento de Patrimonio (/annual): vista anual + mensual con lógica híbrida Transaction/AnnualSummary, gráficos Recharts (barras agrupadas + líneas), indicador de fuente de dato (⚡/📋)
 - [x] Mejoras CRUD Transacciones: filtros por custodio/mes-año/tipo/instrumento, edición de transacciones (modal pre-cargado, instrumento estático), combobox de instrumento reutilizable (InstrumentCombobox), label sidebar /annual → "Análisis de Patrimonio"
 - [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
+- [x] Distribución con porcentajes y gráfico por localización: DonutChart muestra % en tooltip y leyenda; backend agrega by_location; Dashboard agrega tercer donut "Por Localización" (esmeralda=brasil, índigo=exterior)
 
 ---
 

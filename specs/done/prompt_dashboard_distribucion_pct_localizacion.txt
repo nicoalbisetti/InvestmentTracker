@@ -1,0 +1,417 @@
+=============================================================================
+INVESTMENT TRACKER — PORCENTAJES EN DONUTS Y GRÁFICO POR LOCALIZACIÓN
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md desde el repositorio antes de comenzar.
+
+PASO 0 — Setup obligatorio
+---------------------------
+a) Crear TASKS.md en la raíz con todas las tareas como checkboxes.
+   No iniciar el desarrollo hasta tener el TASKS.md completo.
+
+b) Crear lista en ClickUp dentro del folder InvestmentTracker
+   (folder_id: 90177874339):
+     clickup_create_list_in_folder(
+       folder_id="90177874339",
+       name="Feature — Distribución con porcentajes y gráfico localización"
+     )
+
+c) Crear una tarea por ítem del TASKS.md con clickup_create_task.
+   Guardar los IDs retornados para marcarlos como completados.
+
+d) Guardar este spec en el repositorio:
+     mv prompt_dashboard_distribucion_pct_localizacion.txt specs/pending/prompt_dashboard_distribucion_pct_localizacion.txt
+     git add specs/pending/prompt_dashboard_distribucion_pct_localizacion.txt
+     git commit -m "docs: add spec dashboard distribución porcentajes y localización"
+     git push
+
+e) Recién después iniciar el desarrollo.
+   Marcar cada tarea como completada en ClickUp al terminarla.
+
+CONVENCIÓN DURANTE EL DESARROLLO
+----------------------------------
+A medida que se completa cada tarea:
+  1. Marcarla en TASKS.md: [ ] -> [x]
+  2. Marcarla como completada en ClickUp:
+       clickup_update_task(task_id="<ID>", status="complete")
+
+
+=============================================================================
+PASO FINAL — Al terminar toda la implementación
+=============================================================================
+
+1. git add -A
+   git commit -m "feat(dashboard): porcentajes en donuts y gráfico por localización
+
+   - DonutChart muestra porcentaje en tooltip y en label de leyenda
+   - Backend agrega by_location en /api/dashboard/distribution
+   - Dashboard agrega tercer donut 'Por Localización'
+   - Grid de distribución pasa de 2 a 3 columnas (lg:grid-cols-3 → ya es 3)
+   - LOCATION_COLORS agregado a formatters.ts"
+   git push
+
+2. Actualizar CONTEXT.md:
+   - En /api/dashboard/distribution: agregar que el response incluye
+     by_location además de by_type y by_custodian.
+   - En la descripción del Dashboard: mencionar el tercer donut
+     "Por Localización".
+
+3. Mover spec:
+     git mv specs/pending/prompt_dashboard_distribucion_pct_localizacion.txt specs/done/
+     git commit -m "docs: move spec distribución dashboard to done"
+     git push
+
+4. Enviar mensaje de cierre al canal Slack #claudio-coding
+   (channel_id: C0AMM733V1Q) con slack_send_message.
+
+
+=============================================================================
+1. RESUMEN
+=============================================================================
+
+Tres cambios en el Dashboard:
+
+  CAMBIO-1  Agregar porcentajes al tooltip y a la leyenda del componente
+            DonutChart (afecta los gráficos "Por Tipo" y "Por Custodio"
+            existentes, y el nuevo gráfico).
+
+  CAMBIO-2  Agregar by_location al response de GET /api/dashboard/distribution
+            en el backend.
+
+  CAMBIO-3  Agregar un tercer gráfico "Por Localización" en el Dashboard,
+            usando el nuevo campo by_location.
+
+No hay cambios de schema. No hay migraciones. El layout de 3 columnas en
+la sección de distribución ya existe (lg:grid-cols-3); los dos donuts
+actuales ocupan una columna cada uno y el tercero ocupará la tercera.
+Actualmente el espacio de la tercera columna está ocupado por "Perfil de
+Vencimientos" con col-span-full — ese bloque no se toca; el nuevo donut
+se inserta ANTES de él en la misma grilla.
+
+
+=============================================================================
+2. CONTEXTO RELEVANTE
+=============================================================================
+
+--- 2.1 DonutChart actual ---
+
+  Archivo: frontend/src/components/charts/DonutChart.tsx
+
+  Props actuales:
+    data:    Array<{ name: string; value: number }>
+    colors:  Record<string, string>
+    height?: number (default 260)
+
+  El Tooltip actual solo muestra el valor en BRL (fmtBRL).
+  La Legend actual muestra solo el nombre de la categoría.
+  No hay porcentajes en ningún lugar del componente.
+
+--- 2.2 Uso en Dashboard.tsx ---
+
+  Los dos donuts existentes se renderizan así:
+
+    <DonutChart data={distribution.by_type}     colors={INSTRUMENT_TYPE_COLORS} height={240} />
+    <DonutChart data={distribution.by_custodian} colors={CUSTODIAN_COLORS}       height={240} />
+
+  Los colores INSTRUMENT_TYPE_COLORS y CUSTODIAN_COLORS ya están definidos
+  en frontend/src/utils/formatters.ts.
+
+--- 2.3 Endpoint de distribución actual ---
+
+  GET /api/dashboard/distribution
+  Archivo: backend/app/routers/dashboard.py
+
+  Response actual:
+    {
+      "by_type":      [{ "name": string, "value": number }, ...],
+      "by_custodian": [{ "name": string, "value": number }, ...]
+    }
+
+  La query de by_custodian usa MonthlyPosition con el snapshot más reciente.
+  La query de by_type usa Instrument.current_balance_brl directamente.
+
+--- 2.4 Valores posibles de Instrument.location ---
+
+  "brasil"   — instrumentos domésticos
+  "exterior" — instrumentos internacionales
+  null       — instrumentos sin location asignada (tratar como "brasil")
+
+
+=============================================================================
+3. CAMBIO-1 — Porcentajes en DonutChart
+=============================================================================
+
+Archivo: frontend/src/components/charts/DonutChart.tsx
+
+--- 3.1 Cálculo del total ---
+
+Dentro del componente, calcular el total de los valores filtrados:
+
+  const filtered = data.filter(d => d.value > 0);
+  const total = filtered.reduce((sum, d) => sum + d.value, 0);
+
+--- 3.2 Tooltip con porcentaje ---
+
+Reemplazar el Tooltip actual por un CustomTooltip que muestre
+el valor en BRL Y el porcentaje:
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const item = payload[0];
+    const pct = total > 0 ? (item.value / total) * 100 : 0;
+    return (
+      <div style={{
+        background: '#fff', border: '1px solid #e5e7eb',
+        borderRadius: 8, fontSize: 12, padding: '6px 10px'
+      }}>
+        <p style={{ fontWeight: 600, marginBottom: 2 }}>{item.name}</p>
+        <p>{fmtBRL(item.value)}</p>
+        <p style={{ color: '#6b7280' }}>{pct.toFixed(1)}%</p>
+      </div>
+    );
+  };
+
+Reemplazar <Tooltip formatter=... /> por <Tooltip content={<CustomTooltip />} />.
+
+--- 3.3 Leyenda con porcentaje ---
+
+Reemplazar el formatter de Legend para incluir el porcentaje junto al nombre:
+
+  <Legend
+    iconType="circle"
+    iconSize={8}
+    formatter={(value) => {
+      const item = filtered.find(d => d.name === value);
+      const pct = item && total > 0 ? ((item.value / total) * 100).toFixed(1) : '0.0';
+      return (
+        <span style={{ fontSize: 11, color: '#6b7280' }}>
+          {value} <span style={{ color: '#374151', fontWeight: 500 }}>{pct}%</span>
+        </span>
+      );
+    }}
+  />
+
+--- 3.4 Consideración de dark mode ---
+
+El CustomTooltip usa colores hardcodeados para mantener el mismo patrón
+que el resto de los tooltips del proyecto (fondo blanco, borde gris claro).
+No hay cambio necesario para dark mode en el tooltip.
+
+
+=============================================================================
+4. CAMBIO-2 — Agregar by_location en el backend
+=============================================================================
+
+Archivo: backend/app/routers/dashboard.py
+Función: get_distribution()
+
+Agregar una tercera query para agrupar por location, con el mismo patrón
+que by_custodian (usando MonthlyPosition del snapshot más reciente):
+
+  location_sums = (
+      db.query(
+          func.coalesce(Instrument.location, "brasil"),
+          func.sum(MonthlyPosition.balance_brl)
+      )
+      .join(MonthlyPosition, MonthlyPosition.instrument_id == Instrument.id)
+      .filter(
+          Instrument.status == "activo",
+          MonthlyPosition.date == latest_snap.date,
+          MonthlyPosition.balance_brl.isnot(None),
+          MonthlyPosition.balance_brl > 0,
+      )
+      .group_by(func.coalesce(Instrument.location, "brasil"))
+      .all()
+  )
+  by_location = [{"name": loc, "value": v} for loc, v in location_sums if v]
+
+Actualizar el return para incluir el nuevo campo:
+
+  ANTES:
+    return {"by_type": by_type, "by_custodian": by_custodian}
+
+  DESPUÉS:
+    return {
+        "by_type": by_type,
+        "by_custodian": by_custodian,
+        "by_location": by_location,
+    }
+
+NOTA SOBRE CONSISTENCIA: by_custodian usa MonthlyPosition, pero by_type
+usa Instrument.current_balance_brl. Esta inconsistencia ya existe en el
+código actual y NO debe corregirse en este spec — es un cambio de mayor
+alcance que queda para otra oportunidad. by_location usará MonthlyPosition
+(mismo patrón que by_custodian) para ser consistente con las otras queries
+que leen posiciones reales.
+
+NOTA SOBRE EL GUARD: el return temprano del endpoint es:
+  if not latest_snap:
+      return {"by_type": [], "by_custodian": []}
+Actualizarlo para incluir by_location:
+  if not latest_snap:
+      return {"by_type": [], "by_custodian": [], "by_location": []}
+
+
+=============================================================================
+5. CAMBIO-3 — Nuevo gráfico "Por Localización" en Dashboard
+=============================================================================
+
+--- 5.1 Colores para locations ---
+
+Archivo: frontend/src/utils/formatters.ts
+
+Agregar la constante LOCATION_COLORS junto a CUSTODIAN_COLORS y
+INSTRUMENT_TYPE_COLORS:
+
+  export const LOCATION_COLORS: Record<string, string> = {
+    brasil:   '#10b981',   // esmeralda — mercado doméstico
+    exterior: '#6366f1',   // índigo — mercado internacional
+  };
+
+--- 5.2 Actualizar el estado de distribution en Dashboard.tsx ---
+
+El estado actual es:
+  const [distribution, setDistribution] = useState<any>({ by_type: [], by_custodian: [] });
+
+Actualizar el valor inicial para incluir by_location:
+  const [distribution, setDistribution] = useState<any>({
+    by_type: [],
+    by_custodian: [],
+    by_location: [],
+  });
+
+No hay cambio en el fetch — getDistribution() ya llama al mismo endpoint
+y el nuevo campo by_location llegará automáticamente en el response.
+
+--- 5.3 Importar LOCATION_COLORS en Dashboard.tsx ---
+
+Agregar LOCATION_COLORS al import de formatters:
+
+  ANTES:
+    import { fmtBRL, fmtUSD, fmtPct, fmtDate, INSTRUMENT_TYPE_COLORS, CUSTODIAN_COLORS } from '../utils/formatters';
+
+  DESPUÉS:
+    import { fmtBRL, fmtUSD, fmtPct, fmtDate, INSTRUMENT_TYPE_COLORS, CUSTODIAN_COLORS, LOCATION_COLORS } from '../utils/formatters';
+
+--- 5.4 Insertar el tercer donut en la grilla ---
+
+En Dashboard.tsx, la sección de distribución actual tiene esta estructura:
+
+  <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    {/* By type */}
+    <div className="card"> ... <DonutChart data={distribution.by_type} ... /> </div>
+
+    {/* By custodian */}
+    <div className="card"> ... <DonutChart data={distribution.by_custodian} ... /> </div>
+
+    {/* Maturity profile */}
+    <div className="card col-span-full"> ... </div>
+
+    {/* Top / Bottom 5 */}
+    <div className="card"> ... </div>
+  </div>
+
+Insertar el nuevo donut ENTRE "Por Custodio" y "Maturity profile":
+
+    {/* By location — NUEVO */}
+    <div className="card">
+      <h2 className="font-semibold text-gray-800 dark:text-white mb-3">Por Localización</h2>
+      <DonutChart data={distribution.by_location} colors={LOCATION_COLORS} height={240} />
+    </div>
+
+Los labels de la leyenda del donut usarán los valores "brasil" y "exterior"
+tal como vienen del backend. No es necesario traducirlos — son suficientemente
+claros y consistentes con el resto de la UI.
+
+--- 5.5 Labels en la leyenda ---
+
+Los valores "brasil" y "exterior" se mostrarán directamente en la leyenda.
+El componente DonutChart ya capitaliza nada — muestra el nombre tal como
+viene en data[i].name. Esto es consistente con el resto del sistema.
+
+Si en el futuro se quieren labels más descriptivos (ej: "Brasil" / "Exterior"),
+se puede agregar un formatter al Legend dentro de DonutChart condicionalmente,
+pero NO es parte de este spec.
+
+
+=============================================================================
+6. ARCHIVOS A MODIFICAR
+=============================================================================
+
+  backend/app/routers/dashboard.py
+    - Agregar query location_sums en get_distribution()
+    - Actualizar return y early return para incluir by_location
+
+  frontend/src/utils/formatters.ts
+    - Agregar constante LOCATION_COLORS
+
+  frontend/src/components/charts/DonutChart.tsx
+    - Calcular total dentro del componente
+    - Reemplazar Tooltip por CustomTooltip con porcentaje
+    - Actualizar Legend formatter para mostrar porcentaje
+
+  frontend/src/pages/Dashboard.tsx
+    - Agregar LOCATION_COLORS al import de formatters
+    - Actualizar valor inicial de distribution state
+    - Insertar tercer card con DonutChart por localización
+
+
+=============================================================================
+7. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+[ ] Al hacer hover sobre un segmento del donut "Por Tipo", el tooltip
+    muestra el nombre, el valor en BRL formateado Y el porcentaje con
+    un decimal (ej: "63.4%").
+
+[ ] La leyenda del donut "Por Tipo" muestra cada categoría con su
+    porcentaje al lado (ej: "renta_fija 63.4%").
+
+[ ] Lo mismo aplica para "Por Custodio".
+
+[ ] GET /api/dashboard/distribution retorna by_location con al menos
+    una entrada cuando hay posiciones activas en el mes más reciente.
+
+[ ] El campo by_location del response tiene entries con name "brasil"
+    y/o "exterior" según los datos.
+
+[ ] Instrumentos con location=null se agrupan bajo "brasil" en by_location.
+
+[ ] El donut "Por Localización" aparece en el Dashboard entre "Por Custodio"
+    y "Perfil de Vencimientos".
+
+[ ] El donut "Por Localización" muestra colores diferenciados:
+    verde para "brasil", índigo para "exterior".
+
+[ ] El donut "Por Localización" muestra porcentajes en tooltip y leyenda
+    (por heredar el comportamiento de DonutChart actualizado).
+
+[ ] El early return de get_distribution() cuando no hay snapshot incluye
+    by_location: [].
+
+[ ] El Dashboard no muestra errores de consola relacionados con
+    by_location undefined cuando carga por primera vez.
+
+
+=============================================================================
+TASKS.md — Lista de tareas
+=============================================================================
+
+- [ ] PASO 0: Crear TASKS.md, lista y tareas en ClickUp, commitear spec
+- [ ] BACKEND: Agregar query by_location en get_distribution()
+- [ ] BACKEND: Actualizar return y early return con by_location
+- [ ] FRONTEND: Agregar LOCATION_COLORS en formatters.ts
+- [ ] FRONTEND: Actualizar DonutChart — calcular total, CustomTooltip con pct, Legend con pct
+- [ ] FRONTEND: Agregar LOCATION_COLORS al import en Dashboard.tsx
+- [ ] FRONTEND: Actualizar valor inicial del estado distribution
+- [ ] FRONTEND: Insertar card "Por Localización" en la grilla del Dashboard
+- [ ] QA: Verificar todos los criterios de aceptación
+- [ ] PASO FINAL: Commit, actualizar CONTEXT.md, mover spec, Slack
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================
