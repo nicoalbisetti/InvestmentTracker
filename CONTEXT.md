@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 23 Abr 2026 (actualizado: Mejoras CRUD Transacciones — filtros avanzados, edición, combobox de instrumento).
+> Refleja el estado REAL del código al 23 Abr 2026 (actualizado: Mejoras endpoint update-usd-rate — criterio currency, persistencia usd_rate, sync_snapshot, response desglosado).
 
 ---
 
@@ -420,7 +420,7 @@ InvestmentTracker/
 | GET | `/last-fixed-income-date` | Último mes importado (renta_fija) |
 | GET | `/count-without-price` | Count de renta_fija activos sin balance |
 | POST | `/update-equities-prices?month=YYYY-MM` | Actualiza precios B3 via yfinance |
-| POST | `/update-usd-rate?month=YYYY-MM` | Actualiza cotización USD/BRL |
+| POST | `/update-usd-rate?month=YYYY-MM` | Actualiza cotización USD/BRL. Clasifica posiciones por `Instrument.currency` (no `location`). Persiste `usd_rate` en cada `MonthlyPosition`. Recalcula snapshot via `sync_snapshot_for_date`. Response incluye `usd_recalculated`, `brl_recalculated`, `skipped_no_balance`. |
 | POST | `/copy-previous-month` | Copia balances/quantities de los instrumentos activos al mes actual |
 | POST | `/recalculate-stats` | Recalcula current_balance_brl, portfolio_pct, return_1m/3m/6m/12m (vía compute_period_return), return_source, rankings |
 | POST | `/ensure-month` | Crea MonthlyPosition vacía para instrument_id+month si no existe; retorna mp_id |

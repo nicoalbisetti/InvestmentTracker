@@ -1,0 +1,389 @@
+=============================================================================
+INVESTMENT TRACKER — MEJORAS ENDPOINT UPDATE-USD-RATE
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md desde el repositorio antes de comenzar.
+
+PASO 0 — Setup obligatorio
+---------------------------
+a) Crear TASKS.md en la raíz con todas las tareas como checkboxes.
+   No iniciar el desarrollo hasta tener el TASKS.md completo.
+
+b) Crear lista en ClickUp dentro del folder InvestmentTracker
+   (folder_id: 90177874339):
+     clickup_create_list_in_folder(
+       folder_id="90177874339",
+       name="Feature — Mejoras update-usd-rate"
+     )
+
+c) Crear una tarea por ítem del TASKS.md con clickup_create_task.
+   Guardar los IDs retornados para marcarlos como completados.
+
+d) Guardar este spec en el repositorio:
+     mv prompt_mejoras_update_usd_rate.txt specs/pending/prompt_mejoras_update_usd_rate.txt
+     git add specs/pending/prompt_mejoras_update_usd_rate.txt
+     git commit -m "docs: add spec for mejoras update-usd-rate"
+     git push
+
+e) Recién después iniciar el desarrollo.
+   Marcar cada tarea como completada en ClickUp al terminarla.
+
+CONVENCIÓN DURANTE EL DESARROLLO
+----------------------------------
+A medida que se completa cada tarea:
+  1. Marcarla en TASKS.md: [ ] -> [x]
+  2. Marcarla como completada en ClickUp:
+       clickup_update_task(task_id="<ID>", status="complete")
+
+
+=============================================================================
+PASO FINAL — Al terminar toda la implementación
+=============================================================================
+
+1. git add -A
+   git commit -m "fix(positions): mejoras en update-usd-rate
+
+   - Criterio de clasificación USD cambia de location a currency
+   - Persiste usd_rate en MonthlyPosition al actualizar cotización
+   - Reemplaza actualización manual del snapshot por sync_snapshot_for_date
+   - Response incluye conteo desglosado: usd_recalculated, brl_recalculated,
+     skipped_no_balance"
+   git push
+
+2. Actualizar CONTEXT.md:
+   - En la sección de endpoints /api/positions, actualizar la descripción
+     de POST /update-usd-rate para reflejar el nuevo comportamiento y
+     los campos del response.
+
+3. Mover spec:
+     git mv specs/pending/prompt_mejoras_update_usd_rate.txt specs/done/
+     git commit -m "docs: move mejoras update-usd-rate spec to done"
+     git push
+
+4. Enviar mensaje de cierre al canal Slack #claudio-coding
+   (channel_id: C0AMM733V1Q) con slack_send_message.
+
+
+=============================================================================
+1. RESUMEN
+=============================================================================
+
+Cuatro correcciones en el endpoint POST /api/positions/update-usd-rate,
+ubicado en backend/app/routers/positions.py. No se requieren cambios de
+schema ni migraciones. No se modifican otros archivos del backend ni
+el frontend.
+
+  MEJORA-1  Usar instrument.currency en lugar de instrument.location
+            para determinar si una posición es USD o BRL.
+
+  MEJORA-2  Persistir el nuevo usd_rate en MonthlyPosition.usd_rate
+            para cada posición del mes actualizado.
+
+  MEJORA-3  Reemplazar la actualización manual del PortfolioSnapshot
+            por la llamada a sync_snapshot_for_date(), que recalcula
+            total_brl y total_usd desde la sumatoria real de
+            MonthlyPosition.
+
+  MEJORA-4  Enriquecer el response del endpoint con un desglose de
+            cuántas posiciones se actualizaron por rama (USD, BRL,
+            skipped).
+
+
+=============================================================================
+2. CONTEXTO DEL CÓDIGO ACTUAL
+=============================================================================
+
+Archivo: backend/app/routers/positions.py
+Función: update_usd_rate()
+
+El comportamiento actual del endpoint es:
+
+  a) Obtiene la cotización USD/BRL desde Yahoo Finance (yf.Ticker("USDBRL=X")).
+
+  b) Itera todas las MonthlyPosition del mes target haciendo join con
+     Instrument para obtener inst_location.
+
+  c) Aplica lógica de rama:
+       if inst_location == "exterior":
+           mp.balance_brl = mp.balance_usd * usd_rate
+       else:
+           mp.balance_usd = mp.balance_brl / usd_rate
+
+  d) Actualiza el PortfolioSnapshot manualmente:
+       snap.usd_rate = usd_rate
+       snap.total_usd = snap.total_brl / usd_rate
+
+  e) Retorna:
+       { updated, month, old_rate, new_rate, positions_updated }
+
+sync_snapshot_for_date() ya existe en
+backend/app/services/snapshot_sync.py y es usada por otros endpoints
+(update_position_balance, copy_previous_month, etc.).
+
+
+=============================================================================
+3. MEJORA-1 — Criterio de clasificación: usar currency, no location
+=============================================================================
+
+Archivo: backend/app/routers/positions.py
+
+PROBLEMA:
+  El código actual filtra por inst_location == "exterior" para decidir
+  si una posición está denominada en USD. Pero el campo semánticamente
+  correcto para esto es Instrument.currency. Un instrumento podría tener
+  location != "exterior" y aun así currency == "USD" (o viceversa),
+  produciendo un recalculo incorrecto.
+
+CAMBIO REQUERIDO:
+  Modificar el join para traer Instrument.currency en lugar de
+  Instrument.location, y cambiar la condición de rama.
+
+  ANTES:
+    positions = (
+        db.query(MonthlyPosition, Instrument.location)
+        .join(Instrument, Instrument.id == MonthlyPosition.instrument_id)
+        .filter(func.strftime("%Y-%m", MonthlyPosition.date) == target_month)
+        .all()
+    )
+    for mp, inst_location in positions:
+        if inst_location == "exterior":
+            ...
+
+  DESPUÉS:
+    positions = (
+        db.query(MonthlyPosition, Instrument.currency)
+        .join(Instrument, Instrument.id == MonthlyPosition.instrument_id)
+        .filter(func.strftime("%Y-%m", MonthlyPosition.date) == target_month)
+        .all()
+    )
+    for mp, inst_currency in positions:
+        if inst_currency == "USD":
+            ...
+
+No hay otros cambios en esta sección.
+
+
+=============================================================================
+4. MEJORA-2 — Persistir usd_rate en MonthlyPosition
+=============================================================================
+
+Archivo: backend/app/routers/positions.py
+
+PROBLEMA:
+  El campo MonthlyPosition.usd_rate no se actualiza al ejecutar este
+  endpoint. Otros procesos del sistema (por ejemplo, update-equities-prices
+  para instrumentos USD) leen mp.usd_rate para recalcular balance_brl.
+  Si usd_rate está stale en la posición, esos recálculos posteriores
+  usarán una cotización incorrecta.
+
+CAMBIO REQUERIDO:
+  Dentro del loop de posiciones, asignar mp.usd_rate = usd_rate antes
+  de cualquier otra operación sobre mp.
+
+  ANTES:
+    for mp, inst_currency in positions:
+        if inst_currency == "USD":
+            if mp.balance_usd is not None:
+                mp.balance_brl = round(mp.balance_usd * usd_rate, 2)
+        else:
+            if mp.balance_brl is not None and mp.balance_brl > 0:
+                mp.balance_usd = round(mp.balance_brl / usd_rate, 2)
+
+  DESPUÉS:
+    for mp, inst_currency in positions:
+        mp.usd_rate = usd_rate                            # ← NUEVO
+        if inst_currency == "USD":
+            if mp.balance_usd is not None:
+                mp.balance_brl = round(mp.balance_usd * usd_rate, 2)
+        else:
+            if mp.balance_brl is not None and mp.balance_brl > 0:
+                mp.balance_usd = round(mp.balance_brl / usd_rate, 2)
+
+
+=============================================================================
+5. MEJORA-3 — Reemplazar actualización manual del snapshot
+=============================================================================
+
+Archivo: backend/app/routers/positions.py
+
+PROBLEMA:
+  El código actual actualiza el PortfolioSnapshot a mano:
+    snap.usd_rate = usd_rate
+    snap.total_usd = snap.total_brl / usd_rate
+  Pero no recalcula snap.total_brl. Si algún instrumento exterior cambió
+  su balance_brl (porque recalculamos desde balance_usd × nueva cotización),
+  el total_brl del snapshot queda desactualizado, afectando los KPIs del
+  dashboard.
+
+  sync_snapshot_for_date() ya resuelve esto correctamente: recalcula
+  total_brl sumando todos los MonthlyPosition del mes, y luego recalcula
+  total_usd = total_brl / usd_rate. Es exactamente lo que se necesita.
+
+CAMBIO REQUERIDO:
+  Reemplazar el bloque manual de actualización del snapshot por:
+    1. Solo guardar el usd_rate en el snapshot (para que
+       sync_snapshot_for_date lo pueda usar al calcular total_usd).
+    2. Llamar db.flush() para que las modificaciones de las posiciones
+       sean visibles dentro de la misma transacción.
+    3. Llamar sync_snapshot_for_date(db, target_date).
+    4. Llamar db.commit() al final.
+
+  Verificar que sync_snapshot_for_date esté importada en el archivo.
+  Ya se importa en otros endpoints del mismo router; si no estuviera,
+  agregar el import desde backend/app/services/snapshot_sync.py.
+
+  ANTES:
+    old_rate = None
+    if snap:
+        old_rate = snap.usd_rate
+        snap.usd_rate = usd_rate
+        if snap.total_brl:
+            snap.total_usd = snap.total_brl / usd_rate
+    db.commit()
+
+  DESPUÉS:
+    old_rate = None
+    if snap:
+        old_rate = snap.usd_rate
+        snap.usd_rate = usd_rate           # necesario para sync_snapshot
+    db.flush()
+    sync_snapshot_for_date(db, target_date)
+    db.commit()
+
+  NOTA: target_date es el objeto date del mes procesado. Construirlo así
+  antes del bloque de snapshot, si no existe ya en la función:
+    from datetime import date as date_type
+    target_date = date_type(int(target_month[:4]), int(target_month[5:7]), 1)
+
+
+=============================================================================
+6. MEJORA-4 — Enriquecer el response con conteo desglosado
+=============================================================================
+
+Archivo: backend/app/routers/positions.py
+
+PROBLEMA:
+  El response actual solo incluye positions_updated: N sin distinguir
+  cuántas posiciones se procesaron por cada rama ni cuántas quedaron
+  sin actualizar por falta de datos.
+
+CAMBIO REQUERIDO:
+  Agregar tres contadores en el loop y devolverlos en el response.
+
+  Declarar antes del loop:
+    usd_recalculated = 0
+    brl_recalculated = 0
+    skipped_no_balance = 0
+
+  Dentro del loop, incrementar según el caso:
+
+    mp.usd_rate = usd_rate
+    if inst_currency == "USD":
+        if mp.balance_usd is not None:
+            mp.balance_brl = round(mp.balance_usd * usd_rate, 2)
+            usd_recalculated += 1
+        else:
+            skipped_no_balance += 1
+    else:
+        if mp.balance_brl is not None and mp.balance_brl > 0:
+            mp.balance_usd = round(mp.balance_brl / usd_rate, 2)
+            brl_recalculated += 1
+        else:
+            skipped_no_balance += 1
+
+  Actualizar el return al final de la función:
+
+  ANTES:
+    return {
+        "updated": True,
+        "month": target_month,
+        "old_rate": old_rate,
+        "new_rate": round(usd_rate, 4),
+        "positions_updated": len(positions),
+    }
+
+  DESPUÉS:
+    return {
+        "updated": True,
+        "month": target_month,
+        "old_rate": old_rate,
+        "new_rate": round(usd_rate, 4),
+        "positions_updated": len(positions),
+        "usd_recalculated": usd_recalculated,
+        "brl_recalculated": brl_recalculated,
+        "skipped_no_balance": skipped_no_balance,
+    }
+
+  NOTA: El frontend (Positions.tsx) actualmente muestra old_rate y new_rate
+  en el toast de resultado (usdResult). No es necesario actualizar el
+  frontend para que funcione, pero si se quiere mostrar el desglose en el
+  toast, los campos nuevos ya estarán disponibles en usdResult. No modificar
+  el frontend en esta tarea — dejarlo como mejora opcional futura.
+
+
+=============================================================================
+7. RESUMEN DE CAMBIOS — ARCHIVO ÚNICO
+=============================================================================
+
+Solo se modifica un archivo:
+  backend/app/routers/positions.py — función update_usd_rate()
+
+Ningún cambio de schema. Ninguna migración. Ningún cambio en frontend.
+
+Tabla resumen:
+
+  MEJORA   LÍNEAS AFECTADAS                     RIESGO
+  -------  -----------------------------------  --------
+  1        Join trae currency en lugar de        Muy bajo
+           location; condición if cambia
+  2        mp.usd_rate = usd_rate en el loop     Bajo
+  3        Reemplaza bloque manual de snap        Bajo
+           por sync_snapshot_for_date()
+  4        Tres contadores + campos en return     Ninguno
+
+
+=============================================================================
+8. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+[ ] Al llamar POST /api/positions/update-usd-rate, las MonthlyPosition de
+    instrumentos con currency="USD" recalculan balance_brl desde balance_usd.
+
+[ ] Las MonthlyPosition de instrumentos con currency="BRL" (o distinto de
+    "USD") recalculan balance_usd desde balance_brl.
+
+[ ] Todas las MonthlyPosition del mes procesado tienen mp.usd_rate igual
+    al nuevo rate obtenido de Yahoo Finance.
+
+[ ] El PortfolioSnapshot del mes tiene total_brl recalculado como sumatoria
+    real de los balance_brl de las posiciones del mes (no el valor anterior).
+
+[ ] El response incluye los campos: updated, month, old_rate, new_rate,
+    positions_updated, usd_recalculated, brl_recalculated, skipped_no_balance.
+
+[ ] El endpoint no rompe si no hay PortfolioSnapshot para el mes (comportamiento
+    existente: continúa sin error).
+
+[ ] El endpoint no rompe si no hay posiciones en el mes target (devuelve
+    updated=True con todos los contadores en 0).
+
+
+=============================================================================
+TASKS.md — Lista de tareas
+=============================================================================
+
+- [ ] PASO 0: Crear TASKS.md, lista y tareas en ClickUp, commitear spec
+- [ ] MEJORA-1: Cambiar join y condición: Instrument.location → Instrument.currency
+- [ ] MEJORA-2: Agregar mp.usd_rate = usd_rate dentro del loop
+- [ ] MEJORA-3: Reemplazar bloque manual de snapshot por sync_snapshot_for_date()
+- [ ] MEJORA-4: Agregar contadores y campos al response
+- [ ] QA: Verificar los 7 criterios de aceptación
+- [ ] PASO FINAL: Commit, actualizar CONTEXT.md, mover spec, Slack
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================
