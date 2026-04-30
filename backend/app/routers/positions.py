@@ -580,6 +580,7 @@ def update_usd_rate(
     from datetime import datetime
 
     target_month = month or datetime.today().strftime("%Y-%m")
+    target_date = date(int(target_month[:4]), int(target_month[5:7]), 1)
 
     try:
         tk = yf.Ticker("USDBRL=X")
@@ -592,21 +593,30 @@ def update_usd_rate(
 
     # Update monthly_positions for target month
     positions = (
-        db.query(MonthlyPosition, Instrument.location)
+        db.query(MonthlyPosition, Instrument.currency)
         .join(Instrument, Instrument.id == MonthlyPosition.instrument_id)
         .filter(func.strftime("%Y-%m", MonthlyPosition.date) == target_month)
         .all()
     )
 
-    for mp, inst_location in positions:
-        if inst_location == "exterior":
-            # USD-denominated: recalculate BRL from USD balance × new rate
+    usd_recalculated = 0
+    brl_recalculated = 0
+    skipped_no_balance = 0
+
+    for mp, inst_currency in positions:
+        mp.usd_rate = usd_rate
+        if inst_currency == "USD":
             if mp.balance_usd is not None:
                 mp.balance_brl = round(mp.balance_usd * usd_rate, 2)
+                usd_recalculated += 1
+            else:
+                skipped_no_balance += 1
         else:
-            # BRL-denominated: recalculate USD from BRL balance ÷ new rate
             if mp.balance_brl is not None and mp.balance_brl > 0:
                 mp.balance_usd = round(mp.balance_brl / usd_rate, 2)
+                brl_recalculated += 1
+            else:
+                skipped_no_balance += 1
 
     # Update portfolio_snapshot
     snap = (
@@ -618,9 +628,8 @@ def update_usd_rate(
     if snap:
         old_rate = snap.usd_rate
         snap.usd_rate = usd_rate
-        if snap.total_brl:
-            snap.total_usd = snap.total_brl / usd_rate
-
+    db.flush()
+    sync_snapshot_for_date(db, target_date)
     db.commit()
     return {
         "updated": True,
@@ -628,6 +637,9 @@ def update_usd_rate(
         "old_rate": old_rate,
         "new_rate": round(usd_rate, 4),
         "positions_updated": len(positions),
+        "usd_recalculated": usd_recalculated,
+        "brl_recalculated": brl_recalculated,
+        "skipped_no_balance": skipped_no_balance,
     }
 
 
