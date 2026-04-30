@@ -8,7 +8,7 @@ import BenchmarkChart from '../components/charts/BenchmarkChart';
 import StackedAreaChart from '../components/charts/StackedAreaChart';
 import DonutChart from '../components/charts/DonutChart';
 import MaturityChart from '../components/charts/MaturityChart';
-import { fmtBRL, fmtUSD, fmtPct, fmtDate, INSTRUMENT_TYPE_COLORS, CUSTODIAN_COLORS } from '../utils/formatters';
+import { fmtBRL, fmtUSD, fmtPct, fmtDate, INSTRUMENT_TYPE_COLORS, CUSTODIAN_COLORS, LOCATION_COLORS } from '../utils/formatters';
 
 const RANGE_OPTIONS = [
   { label: '1A', value: '1y' },
@@ -20,7 +20,7 @@ const RANGE_OPTIONS = [
 export default function Dashboard() {
   const [kpis, setKpis] = useState<any>(null);
   const [evolution, setEvolution] = useState<any[]>([]);
-  const [distribution, setDistribution] = useState<any>({ by_type: [], by_custodian: [] });
+  const [distribution, setDistribution] = useState<any>({ by_type: [], by_custodian: [], by_location: [] });
   const [topBottom, setTopBottom] = useState<any>(null);
   const [range, setRange] = useState('all');
   const [currency, setCurrency] = useState<'BRL' | 'USD'>('BRL');
@@ -221,6 +221,12 @@ export default function Dashboard() {
         <div className="card">
           <h2 className="font-semibold text-gray-800 dark:text-white mb-3">Por Custodio</h2>
           <DonutChart data={distribution.by_custodian} colors={CUSTODIAN_COLORS} height={240} />
+        </div>
+
+        {/* By location */}
+        <div className="card">
+          <h2 className="font-semibold text-gray-800 dark:text-white mb-3">Por Localización</h2>
+          <DonutChart data={distribution.by_location} colors={LOCATION_COLORS} height={240} />
         </div>
 
         {/* Maturity profile */}

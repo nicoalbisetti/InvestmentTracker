@@ -1,4 +1,4 @@
-# TASKS — Monto por moneda en transacciones
+# TASKS — Distribución con porcentajes y gráfico por localización
 
 ## PASO 0 — Setup
 - [x] Crear TASKS.md
@@ -6,18 +6,15 @@
 - [x] Crear tareas en ClickUp
 
 ## Backend
-- [ ] BACKEND: Agregar GET /api/quotes/lookup en quotes.py (antes del GET "")
+- [ ] BACKEND: Agregar query by_location en get_distribution()
+- [ ] BACKEND: Actualizar return y early return con by_location
 
 ## Frontend
-- [ ] FRONTEND: Agregar estado quoteRate, quoteFound, manualRate, overrideSecondary
-- [ ] FRONTEND: useEffect para fetch de cotización al cambiar fecha/instrumento/tipo
-- [ ] FRONTEND: Lógica calculatedSecondary y effectiveRate
-- [ ] FRONTEND: Nuevo layout del modal para tipos aplicacion/rescate (BRL y USD)
-- [ ] FRONTEND: Bloque de cotización (encontrada / no encontrada / manual)
-- [ ] FRONTEND: Checkbox de override con pre-carga del valor calculado
-- [ ] FRONTEND: Construcción del payload en handleSave según currency
-- [ ] FRONTEND: Comportamiento en modo edición (override=true por defecto)
-- [ ] FRONTEND: Reset de estados nuevos en closeModal
+- [ ] FRONTEND: Agregar LOCATION_COLORS en formatters.ts
+- [ ] FRONTEND: Actualizar DonutChart — calcular total, CustomTooltip con pct, Legend con pct
+- [ ] FRONTEND: Agregar LOCATION_COLORS al import en Dashboard.tsx
+- [ ] FRONTEND: Actualizar valor inicial del estado distribution
+- [ ] FRONTEND: Insertar card "Por Localización" en la grilla del Dashboard
 
 ## QA
 - [ ] Verificar todos los criterios de aceptación

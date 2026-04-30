@@ -146,7 +146,7 @@ def get_distribution(db: Session = Depends(get_db)):
         .first()
     )
     if not latest_snap:
-        return {"by_type": [], "by_custodian": []}
+        return {"by_type": [], "by_custodian": [], "by_location": []}
 
     # By custodian from latest monthly_positions of active instruments
     custodian_sums = (
@@ -173,7 +173,24 @@ def get_distribution(db: Session = Depends(get_db)):
     )
     by_type = [{"name": t or "outro", "value": v} for t, v in type_sums if v]
 
-    return {"by_type": by_type, "by_custodian": by_custodian}
+    location_sums = (
+        db.query(
+            func.coalesce(Instrument.location, "brasil"),
+            func.sum(MonthlyPosition.balance_brl)
+        )
+        .join(MonthlyPosition, MonthlyPosition.instrument_id == Instrument.id)
+        .filter(
+            Instrument.status == "activo",
+            MonthlyPosition.date == latest_snap.date,
+            MonthlyPosition.balance_brl.isnot(None),
+            MonthlyPosition.balance_brl > 0,
+        )
+        .group_by(func.coalesce(Instrument.location, "brasil"))
+        .all()
+    )
+    by_location = [{"name": loc, "value": v} for loc, v in location_sums if v]
+
+    return {"by_type": by_type, "by_custodian": by_custodian, "by_location": by_location}
 
 
 @router.get("/evolution-by-type")

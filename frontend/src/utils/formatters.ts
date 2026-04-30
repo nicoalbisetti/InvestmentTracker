@@ -75,6 +75,11 @@ export const CUSTODIAN_COLORS: Record<string, string> = {
   USA: '#3b82f6',
 };
 
+export const LOCATION_COLORS: Record<string, string> = {
+  brasil:   '#10b981',
+  exterior: '#6366f1',
+};
+
 export const MONTH_NAMES = [
   'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
   'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez',

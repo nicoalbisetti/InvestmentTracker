@@ -18,6 +18,23 @@ const DEFAULT_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '
 
 export default function DonutChart({ data, colors, height = 260 }: Props) {
   const filtered = data.filter(d => d.value > 0);
+  const total = filtered.reduce((sum, d) => sum + d.value, 0);
+
+  const CustomTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const item = payload[0];
+    const pct = total > 0 ? (item.value / total) * 100 : 0;
+    return (
+      <div style={{
+        background: '#fff', border: '1px solid #e5e7eb',
+        borderRadius: 8, fontSize: 12, padding: '6px 10px',
+      }}>
+        <p style={{ fontWeight: 600, marginBottom: 2 }}>{item.name}</p>
+        <p>{fmtBRL(item.value)}</p>
+        <p style={{ color: '#6b7280' }}>{pct.toFixed(1)}%</p>
+      </div>
+    );
+  };
 
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -38,14 +55,19 @@ export default function DonutChart({ data, colors, height = 260 }: Props) {
             />
           ))}
         </Pie>
-        <Tooltip
-          formatter={(val: any) => [fmtBRL(val), '']}
-          contentStyle={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, fontSize: 12 }}
-        />
+        <Tooltip content={<CustomTooltip />} />
         <Legend
           iconType="circle"
           iconSize={8}
-          formatter={(value) => <span style={{ fontSize: 12, color: '#6b7280' }}>{value}</span>}
+          formatter={(value) => {
+            const item = filtered.find(d => d.name === value);
+            const pct = item && total > 0 ? ((item.value / total) * 100).toFixed(1) : '0.0';
+            return (
+              <span style={{ fontSize: 11, color: '#6b7280' }}>
+                {value} <span style={{ color: '#374151', fontWeight: 500 }}>{pct}%</span>
+              </span>
+            );
+          }}
         />
       </PieChart>
     </ResponsiveContainer>
