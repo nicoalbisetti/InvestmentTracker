@@ -1,18 +1,26 @@
-# TASKS — Mejoras update-usd-rate
+# TASKS — Monto por moneda en transacciones
 
 ## PASO 0 — Setup
 - [x] Crear TASKS.md
 - [x] Crear lista en ClickUp
 - [x] Crear tareas en ClickUp
 
-## Implementación
-- [ ] MEJORA-1: Cambiar join y condición: Instrument.location → Instrument.currency
-- [ ] MEJORA-2: Agregar mp.usd_rate = usd_rate dentro del loop
-- [ ] MEJORA-3: Reemplazar bloque manual de snapshot por sync_snapshot_for_date()
-- [ ] MEJORA-4: Agregar contadores y campos al response
+## Backend
+- [ ] BACKEND: Agregar GET /api/quotes/lookup en quotes.py (antes del GET "")
+
+## Frontend
+- [ ] FRONTEND: Agregar estado quoteRate, quoteFound, manualRate, overrideSecondary
+- [ ] FRONTEND: useEffect para fetch de cotización al cambiar fecha/instrumento/tipo
+- [ ] FRONTEND: Lógica calculatedSecondary y effectiveRate
+- [ ] FRONTEND: Nuevo layout del modal para tipos aplicacion/rescate (BRL y USD)
+- [ ] FRONTEND: Bloque de cotización (encontrada / no encontrada / manual)
+- [ ] FRONTEND: Checkbox de override con pre-carga del valor calculado
+- [ ] FRONTEND: Construcción del payload en handleSave según currency
+- [ ] FRONTEND: Comportamiento en modo edición (override=true por defecto)
+- [ ] FRONTEND: Reset de estados nuevos en closeModal
 
 ## QA
-- [ ] Verificar los 7 criterios de aceptación
+- [ ] Verificar todos los criterios de aceptación
 
 ## PASO FINAL
 - [ ] Commit con mensaje de spec

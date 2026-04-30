@@ -8,6 +8,23 @@ from app.models.quote import Quote
 router = APIRouter(prefix="/api/quotes", tags=["quotes"])
 
 
+@router.get("/lookup")
+def lookup_quote(
+    month: str = Query(..., description="YYYY-MM"),
+    db: Session = Depends(get_db),
+):
+    """Return the USD/BRL rate stored in Quote for a given month."""
+    try:
+        year, mon = int(month[:4]), int(month[5:7])
+        target = date(year, mon, 1)
+    except (ValueError, IndexError):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=422, detail="month debe ser YYYY-MM")
+    q = db.query(Quote).filter(Quote.date == target).first()
+    rate = q.usd_brl if (q and q.usd_brl) else None
+    return {"month": month, "rate": rate, "found": rate is not None}
+
+
 @router.get("")
 def get_quotes(
     date_from: Optional[str] = None,
