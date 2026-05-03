@@ -1,26 +1,10 @@
-# TASKS — Distribución con porcentajes y gráfico por localización
+# TASKS — Edición inline de unit_price en Posiciones
 
-## PASO 0 — Setup
-- [x] Crear TASKS.md
-- [x] Crear lista en ClickUp
-- [x] Crear tareas en ClickUp
-
-## Backend
-- [ ] BACKEND: Agregar query by_location en get_distribution()
-- [ ] BACKEND: Actualizar return y early return con by_location
-
-## Frontend
-- [ ] FRONTEND: Agregar LOCATION_COLORS en formatters.ts
-- [ ] FRONTEND: Actualizar DonutChart — calcular total, CustomTooltip con pct, Legend con pct
-- [ ] FRONTEND: Agregar LOCATION_COLORS al import en Dashboard.tsx
-- [ ] FRONTEND: Actualizar valor inicial del estado distribution
-- [ ] FRONTEND: Insertar card "Por Localización" en la grilla del Dashboard
-
-## QA
-- [ ] Verificar todos los criterios de aceptación
-
-## PASO FINAL
-- [ ] Commit con mensaje de spec
-- [ ] Actualizar CONTEXT.md
-- [ ] Mover spec a specs/done/
-- [ ] Enviar mensaje a Slack
+- [x] PASO 0: Guardar spec, crear lista y tareas en ClickUp, commitear
+- [x] BACKEND: Agregar endpoint PATCH /{mp_id}/unit-price
+- [x] BACKEND: Lógica de recálculo BRL e instrumentos USD con fallback usd_rate
+- [x] BACKEND: Llamar sync_snapshot_for_date al finalizar
+- [x] FRONTEND: Agregar función saveUnitPrice() en Positions.tsx
+- [x] FRONTEND: Hacer celda unit_price clickeable/editable para accion/fii
+- [x] QA: Verificar los 10 criterios de aceptación
+- [x] PASO FINAL: Commit, actualizar CONTEXT.md, mover spec, Slack

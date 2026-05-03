@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 23 Abr 2026 (actualizado: Monto por moneda en transacciones — campo primario por currency, calculado secundario, lookup cotización, override manual).
+> Refleja el estado REAL del código al 03 May 2026 (actualizado: Edición inline de unit_price en Posiciones — PATCH /unit-price, recálculo en cascada BRL/USD, fallback usd_rate, sync snapshot).
 
 ---
 
@@ -416,6 +416,7 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/?sort=default&order=asc&...` | Lista paginada; sort=default → brasil→exterior→tipo→nombre |
 | GET | `/export` | CSV stream con posiciones |
+| PATCH | `/{mp_id}/unit-price` | Actualiza unit_price y recalcula balances en cascada (accion/fii). BRL: balance_brl = qty × price, balance_usd = balance_brl / usd_rate. USD: balance_usd = qty × price, balance_brl = balance_usd × usd_rate. Usa mp.usd_rate con fallback al PortfolioSnapshot del mes. Llama sync_snapshot_for_date. |
 | PATCH | `/{mp_id}/balance` | Actualiza balance_brl, balance_usd o quantity |
 | GET | `/last-fixed-income-date` | Último mes importado (renta_fija) |
 | GET | `/count-without-price` | Count de renta_fija activos sin balance |
@@ -545,6 +546,7 @@ distribución por tipo/custodio/localización (tres donuts con porcentaje en too
 ### Positions (`/positions`)
 Tabla de posiciones filtrable/paginable/sortable. Sort default: brasil→exterior→tipo→nombre.
 Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL, copiar mes ant.
+Edición inline: celdas de Saldo BRL, Saldo USD y Cantidad son clickeables para todos los tipos. La celda "Precio actual" (P. Unit.) es clickeable y editable solo para instrumentos tipo accion/fii — muestra subrayado punteado al hover; instrumentos sin precio muestran "Sin precio" en gris itálico.
 **API:** `/api/positions`, `/api/positions/export`, `/api/positions/copy-previous-month`, etc.
 
 ### History (`/history`)
@@ -755,6 +757,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Mejoras CRUD Transacciones: filtros por custodio/mes-año/tipo/instrumento, edición de transacciones (modal pre-cargado, instrumento estático), combobox de instrumento reutilizable (InstrumentCombobox), label sidebar /annual → "Análisis de Patrimonio"
 - [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
 - [x] Distribución con porcentajes y gráfico por localización: DonutChart muestra % en tooltip y leyenda; backend agrega by_location; Dashboard agrega tercer donut "Por Localización" (esmeralda=brasil, índigo=exterior)
+- [x] Edición inline de unit_price en Posiciones: celda P. Unit. clickeable para accion/fii; PATCH /api/positions/{mp_id}/unit-price recalcula balances en cascada con fallback usd_rate; sincroniza PortfolioSnapshot del mes afectado
 
 ---
 

@@ -532,6 +532,55 @@ def copy_previous_month(payload: dict, db: Session = Depends(get_db)):
     return {"copied": copied, "target_month": target_month}
 
 
+@router.patch("/{mp_id}/unit-price")
+def update_position_unit_price(
+    mp_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+    mp = db.query(MonthlyPosition).filter_by(id=mp_id).first()
+    if not mp:
+        raise HTTPException(status_code=404, detail="Posición no encontrada")
+
+    unit_price_val = payload.get("unit_price")
+    if unit_price_val is None or not isinstance(unit_price_val, (int, float)) or unit_price_val <= 0:
+        raise HTTPException(status_code=422, detail="unit_price debe ser un número positivo")
+
+    inst = db.query(Instrument).filter_by(id=mp.instrument_id).first()
+    new_unit_price = float(unit_price_val)
+    mp.unit_price = new_unit_price
+
+    usd_rate = mp.usd_rate
+    if usd_rate is None:
+        snap = db.query(PortfolioSnapshot).filter(
+            func.strftime("%Y-%m", PortfolioSnapshot.date) == mp.date.strftime("%Y-%m")
+        ).first()
+        usd_rate = snap.usd_rate if snap and snap.usd_rate else None
+
+    if mp.quantity is not None and mp.quantity != 0:
+        if inst.currency == "USD":
+            mp.balance_usd = round(mp.quantity * new_unit_price, 2)
+            if usd_rate:
+                mp.balance_brl = round(mp.balance_usd * usd_rate, 2)
+        else:
+            mp.balance_brl = round(mp.quantity * new_unit_price, 2)
+            if usd_rate:
+                mp.balance_usd = round(mp.balance_brl / usd_rate, 2)
+
+    db.flush()
+    sync_snapshot_for_date(db, mp.date)
+    db.commit()
+
+    return {
+        "mp_id": mp_id,
+        "unit_price": mp.unit_price,
+        "balance_brl": mp.balance_brl,
+        "balance_usd": mp.balance_usd,
+        "quantity": mp.quantity,
+    }
+
+
 @router.patch("/{mp_id}/balance")
 def update_position_balance(
     mp_id: int,

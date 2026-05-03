@@ -48,7 +48,7 @@ export default function Positions() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [priceMonth, setPriceMonth] = useState(currentMonth);
   const isHistorical = priceMonth !== currentMonth;
-  const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity'; value: string } | null>(null);
+  const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity' | 'unit_price'; value: string } | null>(null);
   const [showReturns, setShowReturns] = useState(false);
   const [custodianOptions, setCustodianOptions] = useState<string[]>([]);
   const [rescateTarget, setRescateTarget] = useState<{
@@ -90,6 +90,15 @@ export default function Positions() {
     const num = parseFloat(value.replace(',', '.'));
     if (isNaN(num)) { setEditing(null); return; }
     await client.patch(`/api/positions/${mpId}/balance`, { [field]: num });
+    setEditing(null);
+    const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
+    load({ ...filters, search: search || undefined, month });
+  };
+
+  const saveUnitPrice = async (mpId: number, value: string) => {
+    const num = parseFloat(value.replace(',', '.'));
+    if (isNaN(num) || num <= 0) { setEditing(null); return; }
+    await client.patch(`/api/positions/${mpId}/unit-price`, { unit_price: num });
     setEditing(null);
     const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
     load({ ...filters, search: search || undefined, month });
@@ -560,12 +569,40 @@ export default function Positions() {
                             </span>
                           )}
                         </td>
-                        <td className={`px-3 py-2.5 font-mono text-sm ${
-                          row.unit_price == null ? 'text-gray-400' :
-                          row.avg_price == null ? 'text-gray-600 dark:text-gray-400' :
-                          row.unit_price >= row.avg_price ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'
-                        }`}>
-                          {row.unit_price != null ? row.unit_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        <td
+                          className={`px-3 py-2 font-mono text-sm ${(row.type === 'accion' || row.type === 'fii') ? 'cursor-pointer group' : ''} ${
+                            row.unit_price == null ? 'text-gray-400' :
+                            row.avg_price == null ? 'text-gray-600 dark:text-gray-400' :
+                            row.unit_price >= row.avg_price ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'
+                          }`}
+                          onClick={async () => {
+                            if (row.type !== 'accion' && row.type !== 'fii') return;
+                            let mpId = row.mp_id;
+                            if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
+                            setEditing({ mpId, instrumentId: row.id, field: 'unit_price', value: String(row.unit_price ?? '') });
+                          }}
+                        >
+                          {editing?.instrumentId === row.id && editing.field === 'unit_price' ? (
+                            <input
+                              autoFocus
+                              className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
+                              value={editing.value}
+                              onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
+                              onBlur={() => saveUnitPrice(editing.mpId, editing.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveUnitPrice(editing.mpId, editing.value);
+                                if (e.key === 'Escape') setEditing(null);
+                              }}
+                            />
+                          ) : (
+                            <span className={row.type === 'accion' || row.type === 'fii' ? 'group-hover:underline decoration-dotted' : ''}>
+                              {row.unit_price != null
+                                ? row.unit_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                                : (row.type === 'accion' || row.type === 'fii'
+                                    ? <span className="text-xs text-gray-400 italic">Sin precio</span>
+                                    : '—')}
+                            </span>
+                          )}
                         </td>
                         <td className="px-3 py-2.5 font-mono text-sm text-gray-500">
                           {row.avg_price != null ? row.avg_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}

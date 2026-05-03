@@ -1,0 +1,467 @@
+=============================================================================
+INVESTMENT TRACKER — EDICIÓN INLINE DE PRECIO UNITARIO EN POSICIONES
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md desde el repositorio antes de comenzar.
+
+PASO 0 — Setup obligatorio
+---------------------------
+a) Guardar este spec en el repositorio:
+     mv prompt_edicion_unit_price_posiciones.txt specs/pending/
+     git add specs/pending/prompt_edicion_unit_price_posiciones.txt
+     git commit -m "docs: add spec for edición inline de unit_price"
+     git push
+
+b) Crear lista en ClickUp dentro del folder InvestmentTracker
+   (folder_id: 90177874339):
+     clickup_create_list_in_folder(
+       folder_id="90177874339",
+       name="Feature — Edición inline de unit_price"
+     )
+
+c) Crear una tarea por ítem del TASKS.md con clickup_create_task.
+   Guardar los IDs retornados para marcarlos como completados.
+
+d) Recién después iniciar el desarrollo.
+   Marcar cada tarea como completada en ClickUp al terminarla.
+
+CONVENCIÓN DURANTE EL DESARROLLO
+----------------------------------
+A medida que se completa cada tarea:
+  1. Marcarla en TASKS.md: [ ] -> [x]
+  2. Marcarla como completada en ClickUp:
+       clickup_update_task(task_id="<ID>", status="complete")
+
+
+=============================================================================
+PASO FINAL — Al terminar toda la implementación
+=============================================================================
+
+1. git add -A
+   git commit -m "feat(positions): edición inline de unit_price para accion/fii
+
+   - Nuevo endpoint PATCH /api/positions/{mp_id}/unit-price
+   - Recalcula balance_usd = quantity × unit_price (instrumentos USD)
+   - Recalcula balance_brl = balance_usd × usd_rate (instrumentos USD)
+   - Recalcula balance_brl = quantity × unit_price (instrumentos BRL)
+   - Recalcula balance_usd = balance_brl / usd_rate (instrumentos BRL)
+   - Llama sync_snapshot_for_date() al finalizar
+   - Celda unit_price en Positions.tsx clickeable para accion/fii
+   - Mismo patrón de edición inline que balance_brl/balance_usd/quantity"
+   git push
+
+2. Actualizar CONTEXT.md:
+   - En endpoints /api/positions, agregar la fila del nuevo PATCH
+   - En la descripción de Positions, mencionar la celda de precio editable
+
+3. Mover spec:
+     git mv specs/pending/prompt_edicion_unit_price_posiciones.txt specs/done/
+     git commit -m "docs: move edición unit_price spec to done"
+     git push
+
+4. Enviar mensaje de cierre al canal Slack #claudio-coding
+   (channel_id: C0AMM733V1Q) con slack_send_message.
+
+
+=============================================================================
+1. RESUMEN
+=============================================================================
+
+Permitir al usuario editar el precio unitario (unit_price) directamente
+desde la tabla de Posiciones — tanto para el mes actual como para meses
+históricos — en instrumentos de tipo "accion" y "fii".
+
+Al guardar el nuevo precio, el backend recalcula en cascada:
+  - balance_usd = quantity × unit_price  (si currency = "USD")
+  - balance_brl = balance_usd × usd_rate (si currency = "USD")
+  - balance_brl = quantity × unit_price  (si currency = "BRL")
+  - balance_usd = balance_brl / usd_rate (si currency = "BRL")
+
+Finalmente sincroniza el PortfolioSnapshot del mes afectado.
+
+Esto permite cargar fondos del exterior con cotización mensual manual
+(ej: AL30) sin necesidad de ir a yfinance ni a ninguna pantalla adicional.
+
+No se requieren cambios de schema ni migraciones.
+
+
+=============================================================================
+2. CONTEXTO RELEVANTE
+=============================================================================
+
+--- 2.1 Endpoint existente PATCH /{mp_id}/balance ---
+
+Archivo: backend/app/routers/positions.py
+
+El endpoint actual acepta balance_brl, balance_usd o quantity en el payload.
+NO acepta unit_price. Cuando recibe balance_brl, recalcula balance_usd usando
+el usd_rate del PortfolioSnapshot del mes (no del MonthlyPosition).
+
+Este endpoint NO se modifica. Se crea uno nuevo dedicado a unit_price
+para mantener la semántica clara y la lógica separada.
+
+--- 2.2 Lógica de update-equities-prices (referencia) ---
+
+Archivo: backend/app/routers/positions.py — función update_equities_prices()
+
+Para instrumentos BRL:
+  mp.balance_brl = mp.quantity * current_price
+  mp.unit_price = current_price
+
+Para instrumentos USD:
+  mp.balance_usd = mp.quantity * current_price_usd
+  mp.unit_price = current_price_usd
+  mp.balance_brl = mp.balance_usd * mp.usd_rate   ← usa usd_rate del mp
+
+El nuevo endpoint debe seguir EXACTAMENTE esta misma lógica.
+Diferencia clave: usa mp.usd_rate (del MonthlyPosition) — no el del
+PortfolioSnapshot — para ser consistente con update-equities-prices
+y para funcionar correctamente en meses históricos.
+
+--- 2.3 Estado de edición inline en Positions.tsx ---
+
+Estado actual:
+  editing: { mpId: number, instrumentId: number, field: string, value: string } | null
+
+Campos actualmente editables:
+  'balance_brl'  → PATCH /{mp_id}/balance con { balance_brl: num }
+  'balance_usd'  → PATCH /{mp_id}/balance con { balance_usd: num }
+  'quantity'     → PATCH /{mp_id}/balance con { quantity: num }
+
+Función saveBalance(mpId, field, value) maneja todos los casos actuales
+enviando el payload al endpoint existente y luego llamando load() para
+refrescar la tabla.
+
+--- 2.4 Columna unit_price en la tabla ---
+
+La celda de unit_price ya se renderiza en Positions.tsx con coloración
+condicional (verde si unit_price >= avg_price, rojo si no), pero no es
+clickeable ni editable. Solo aplica para filas de tipo "accion" o "fii".
+
+--- 2.5 usd_rate disponible en MonthlyPosition ---
+
+mp.usd_rate se persiste desde el endpoint update-usd-rate (post mejoras).
+Para meses históricos, este valor debería estar disponible.
+Si mp.usd_rate es null (posición antigua sin rate), el backend debe buscar
+el usd_rate en el PortfolioSnapshot del mismo mes como fallback.
+
+
+=============================================================================
+3. BACKEND — NUEVO ENDPOINT
+=============================================================================
+
+Archivo: backend/app/routers/positions.py
+
+Agregar endpoint:
+
+  PATCH /api/positions/{mp_id}/unit-price
+
+--- 3.1 Firma ---
+
+  @router.patch("/{mp_id}/unit-price")
+  def update_position_unit_price(
+      mp_id: int,
+      payload: dict,
+      db: Session = Depends(get_db),
+  ):
+
+--- 3.2 Payload esperado ---
+
+  {
+    "unit_price": 125.50   // float, requerido, > 0
+  }
+
+--- 3.3 Validaciones ---
+
+  - Si mp no existe → 404 "Posición no encontrada"
+  - Si unit_price no está en payload o no es un número positivo → 422
+  - Si mp.quantity es null o 0 → guardar unit_price igualmente pero
+    NO recalcular balances (loguear info). Retornar con balance sin cambios.
+
+--- 3.4 Lógica de recálculo ---
+
+  mp = buscar MonthlyPosition por mp_id
+  inst = buscar Instrument por mp.instrument_id
+
+  new_unit_price = float(payload["unit_price"])
+  mp.unit_price = new_unit_price
+
+  # Resolver usd_rate: primero del mp, fallback al snapshot del mes
+  usd_rate = mp.usd_rate
+  if usd_rate is None:
+      snap = db.query(PortfolioSnapshot).filter(
+          func.strftime("%Y-%m", PortfolioSnapshot.date) == mp.date.strftime("%Y-%m")
+      ).first()
+      usd_rate = snap.usd_rate if snap and snap.usd_rate else None
+
+  if mp.quantity is not None and mp.quantity != 0:
+      if inst.currency == "USD":
+          mp.balance_usd = round(mp.quantity * new_unit_price, 2)
+          if usd_rate:
+              mp.balance_brl = round(mp.balance_usd * usd_rate, 2)
+      else:
+          # BRL
+          mp.balance_brl = round(mp.quantity * new_unit_price, 2)
+          if usd_rate:
+              mp.balance_usd = round(mp.balance_brl / usd_rate, 2)
+
+  db.flush()
+  sync_snapshot_for_date(db, mp.date)
+  db.commit()
+
+--- 3.5 Response ---
+
+  {
+    "mp_id": int,
+    "unit_price": float,
+    "balance_brl": float | null,
+    "balance_usd": float | null,
+    "quantity": float | null
+  }
+
+--- 3.6 Imports necesarios ---
+
+  sync_snapshot_for_date ya está importada en el mismo router.
+  PortfolioSnapshot ya está importado.
+  func de sqlalchemy ya está importado.
+  No se requieren imports nuevos.
+
+
+=============================================================================
+4. FRONTEND — Positions.tsx
+=============================================================================
+
+Archivo: frontend/src/pages/Positions.tsx
+
+--- 4.1 Ampliar el tipo del estado editing ---
+
+El estado editing ya tiene la forma:
+  { mpId: number, instrumentId: number, field: string, value: string }
+
+No es necesario cambiar el tipo. Se agrega 'unit_price' como valor válido
+de field. El estado existente es suficiente.
+
+--- 4.2 Nueva función saveUnitPrice ---
+
+Agregar función separada de saveBalance para mantener semántica clara:
+
+  const saveUnitPrice = async (mpId: number, value: string) => {
+    const num = parseFloat(value.replace(',', '.'));
+    if (isNaN(num) || num <= 0) { setEditing(null); return; }
+    await client.patch(`/api/positions/${mpId}/unit-price`, { unit_price: num });
+    setEditing(null);
+    const month = (priceMonth !== currentMonth || filters.status === 'cerrado')
+      ? priceMonth : undefined;
+    load({ ...filters, search: search || undefined, month });
+  };
+
+--- 4.3 Modificar la celda unit_price en la tabla ---
+
+Ubicar la celda actual que renderiza unit_price (buscar el td con
+`row.unit_price != null ? row.unit_price.toLocaleString...`).
+
+CONDICIÓN para hacer la celda editable:
+  Solo cuando row.type === 'accion' || row.type === 'fii'
+
+ANTES (celda read-only para todos):
+  <td className={`px-3 py-2.5 font-mono text-sm ${...colorClass...}`}>
+    {row.unit_price != null
+      ? row.unit_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      : '—'}
+  </td>
+
+DESPUÉS (editable solo para accion/fii):
+  <td
+    className={`px-3 py-2 font-mono text-sm cursor-pointer group ${...colorClass...}`}
+    onClick={async () => {
+      if (row.type !== 'accion' && row.type !== 'fii') return;
+      let mpId = row.mp_id;
+      if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
+      setEditing({ mpId, instrumentId: row.id, field: 'unit_price',
+                   value: String(row.unit_price ?? '') });
+    }}
+  >
+    {editing?.instrumentId === row.id && editing.field === 'unit_price' ? (
+      <input
+        autoFocus
+        className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
+        value={editing.value}
+        onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
+        onBlur={() => saveUnitPrice(editing.mpId, editing.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') saveUnitPrice(editing.mpId, editing.value);
+          if (e.key === 'Escape') setEditing(null);
+        }}
+      />
+    ) : (
+      <span className={row.type === 'accion' || row.type === 'fii'
+        ? 'group-hover:underline decoration-dotted' : ''}>
+        {row.unit_price != null
+          ? row.unit_price.toLocaleString('pt-BR',
+              { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : (row.type === 'accion' || row.type === 'fii'
+              ? <span className="text-xs text-gray-400 italic">Sin precio</span>
+              : '—')}
+      </span>
+    )}
+  </td>
+
+NOTA: La colorClass (verde/rojo según unit_price vs avg_price) debe
+mantenerse exactamente igual que antes. Solo cambia el onClick y la
+estructura condicional del contenido.
+
+--- 4.4 Cursor y hover ---
+
+Para filas donde row.type !== 'accion' && row.type !== 'fii':
+  - No agregar cursor-pointer
+  - No agregar group-hover:underline
+  - La celda debe verse idéntica a como estaba antes
+
+Para filas accion/fii:
+  - cursor-pointer en el td
+  - group-hover:underline decoration-dotted en el span interno
+  - Tooltip implícito: el subrayado punteado ya comunica "editable"
+
+--- 4.5 Título de columna (sin cambios) ---
+
+La columna "P. Unit." ya existe en el thead. No se modifica.
+Opcionalmente se puede agregar un title="Click para editar (accion/fii)"
+en el th, pero NO es requerido.
+
+
+=============================================================================
+5. CASOS BORDE Y VALIDACIONES
+=============================================================================
+
+--- 5.1 Instrumento sin quantity ---
+
+Si mp.quantity es null o 0:
+  - Guardar el unit_price igualmente en la BD
+  - NO recalcular balance_brl ni balance_usd
+  - Retornar HTTP 200 con los balances sin cambios
+  - La UI muestra el nuevo precio pero los balances permanecen igual
+  Razón: el usuario puede querer guardar el precio antes de ingresar
+  la cantidad. Es mejor persistir el precio que bloquearlo.
+
+--- 5.2 usd_rate no disponible en mp ni en snapshot ---
+
+Si usd_rate es null en el mp Y no hay PortfolioSnapshot para ese mes:
+  - Para currency="USD": guardar unit_price y balance_usd, dejar
+    balance_brl sin cambios (puede quedar null o stale).
+  - Para currency="BRL": guardar unit_price y balance_brl, dejar
+    balance_usd sin cambios.
+  - Retornar HTTP 200. No lanzar error — es preferible persistir lo
+    que se puede calcular.
+  Razón: el usuario puede cargar el precio y luego actualizar la
+  cotización USD/BRL por separado.
+
+--- 5.3 Edición en mes histórico ---
+
+Funciona igual que en el mes actual. El endpoint no distingue entre
+mes actual e histórico — opera sobre el mp_id recibido y sincroniza
+el snapshot de ese mes específico.
+
+--- 5.4 Instrumento tipo != accion/fii ---
+
+En el frontend: el onClick hace return inmediatamente si el tipo no
+es accion ni fii. La celda no activa el input.
+
+En el backend: el endpoint no valida el tipo del instrumento — acepta
+cualquier mp_id. La restricción es solo de UX, no de seguridad. Si
+en el futuro se quieren editar precios de otros tipos, no hay que
+cambiar el backend.
+
+--- 5.5 Valor ingresado inválido (vacío, texto, negativo) ---
+
+En la función saveUnitPrice:
+  - parseFloat falla o da NaN → setEditing(null) sin llamar al backend
+  - Valor <= 0 → setEditing(null) sin llamar al backend
+  - El campo vuelve al valor anterior visualmente al refrescar
+
+--- 5.6 Error de red o 404 del backend ---
+
+El try/catch no está explicitado en saveBalance actual (el código
+existente tampoco lo tiene en las funciones inline). Mantener
+consistencia: no agregar manejo de error explícito en saveUnitPrice.
+El error se verá en consola. Si en el futuro se quiere mostrar un
+toast de error, hacerlo como mejora separada.
+
+
+=============================================================================
+6. ARCHIVOS A MODIFICAR
+=============================================================================
+
+BACKEND:
+  backend/app/routers/positions.py
+    - Agregar endpoint PATCH /{mp_id}/unit-price
+    - Ubicar ANTES del endpoint PATCH /{mp_id}/balance para evitar
+      que FastAPI interprete "unit-price" como un path param de mp_id
+      (aunque en este caso no aplica porque son rutas distintas —
+      verificar el orden de declaración de todas formas)
+
+FRONTEND:
+  frontend/src/pages/Positions.tsx
+    - Agregar función saveUnitPrice()
+    - Modificar la celda de unit_price para hacerla clickeable e
+      inline-editable solo para type accion/fii
+
+
+=============================================================================
+7. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+[ ] Al hacer click en la celda de P. Unit. de una acción, aparece un
+    input con el precio actual pre-cargado.
+
+[ ] Al hacer click en la celda de P. Unit. de una renta fija o fundo,
+    NO aparece input (la celda es read-only).
+
+[ ] Al ingresar un nuevo precio y presionar Enter (o perder el foco),
+    la tabla se refresca con el nuevo precio y los balances actualizados.
+
+[ ] Para un instrumento BRL (ej: XPML11) con quantity=100 y nuevo
+    unit_price=12.50: balance_brl = 1250.00.
+
+[ ] Para un instrumento USD (ej: AL30) con quantity=1000,
+    unit_price=55.00 y usd_rate=5.80:
+    balance_usd = 55000.00, balance_brl = 319000.00.
+
+[ ] El PortfolioSnapshot del mes afectado tiene total_brl actualizado
+    (verificar con el KPI del dashboard).
+
+[ ] Editar el precio de un mes histórico (navegando con el selector
+    de mes en Positions) actualiza correctamente ese mes sin afectar
+    los meses posteriores.
+
+[ ] Si mp.quantity es null, el endpoint retorna 200 y guarda el
+    unit_price, pero balance_brl y balance_usd no cambian.
+
+[ ] Presionar Escape cancela la edición sin guardar.
+
+[ ] El valor inválido (texto, vacío, 0 o negativo) descarta la edición
+    sin llamar al backend.
+
+[ ] La coloración verde/rojo (unit_price vs avg_price) se mantiene
+    igual después de la edición.
+
+
+=============================================================================
+TASKS.md — Lista de tareas
+=============================================================================
+
+- [ ] PASO 0: Guardar spec, crear lista y tareas en ClickUp, commitear
+- [ ] BACKEND: Agregar endpoint PATCH /{mp_id}/unit-price
+- [ ] BACKEND: Lógica de recálculo BRL e instrumentos USD con fallback usd_rate
+- [ ] BACKEND: Llamar sync_snapshot_for_date al finalizar
+- [ ] FRONTEND: Agregar función saveUnitPrice() en Positions.tsx
+- [ ] FRONTEND: Hacer celda unit_price clickeable/editable para accion/fii
+- [ ] QA: Verificar los 10 criterios de aceptación
+- [ ] PASO FINAL: Commit, actualizar CONTEXT.md, mover spec, Slack
+
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================
