@@ -101,7 +101,7 @@ def compute_period_return(
             db.query(Transaction.type, func.sum(Transaction.amount_brl))
             .filter(
                 Transaction.instrument_id == instrument_id,
-                Transaction.date > mp_prev.date,
+                Transaction.date >= mp_prev.date + relativedelta(months=1),
                 Transaction.date < period_end,
                 Transaction.type.in_(["aplicacion", "rescate"]),
             )
