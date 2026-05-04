@@ -93,13 +93,16 @@ def compute_period_return(
         if abs((mp_prev.date - target_date).days) > ALLOWED_GAP_DAYS:
             return None
 
-        # Net flow from transactions in the period
+        # Net flow from transactions in the period.
+        # Upper bound is the first day of the month AFTER latest_date so that
+        # transactions dated anywhere within the latest month are included.
+        period_end = latest_date + relativedelta(months=1)
         flows = (
             db.query(Transaction.type, func.sum(Transaction.amount_brl))
             .filter(
                 Transaction.instrument_id == instrument_id,
                 Transaction.date > mp_prev.date,
-                Transaction.date <= latest_date,
+                Transaction.date < period_end,
                 Transaction.type.in_(["aplicacion", "rescate"]),
             )
             .group_by(Transaction.type)

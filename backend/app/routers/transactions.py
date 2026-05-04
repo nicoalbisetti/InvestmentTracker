@@ -94,10 +94,16 @@ def _recompute_positions(db: Session, instrument_id: int, from_date: date):
             (t.amount_usd or 0) * (1 if t.type == 'aplicacion' else -1)
             for t in txns if t.type in ('aplicacion', 'rescate') and t.amount_usd
         )
+        prev_running_usd = running_usd
         running_brl = running_brl + net_brl
         running_usd = running_usd + net_usd
-        pos.balance_brl = max(running_brl, 0.0)
-        pos.balance_usd = max(running_usd, 0.0) if running_usd else pos.balance_usd
+        pos.balance_usd = max(running_usd, 0.0)
+        # When USD goes to zero via a rescate with no BRL amount, zero out BRL too
+        if prev_running_usd > 0 and running_usd <= 0 and net_brl == 0:
+            running_brl = 0
+            pos.balance_brl = 0.0
+        else:
+            pos.balance_brl = max(running_brl, 0.0)
         
         db.flush()
         sync_snapshot_for_date(db, m)
