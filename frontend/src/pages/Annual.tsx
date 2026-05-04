@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { getAnnualGrowth, getMonthlyGrowth } from '../api/growth';
 import type { AnnualGrowthResponse, MonthlyGrowthResponse, MonthlyTransaction } from '../api/growth';
-import { fmtBRL, fmtPct, fmtDate, MONTH_NAMES } from '../utils/formatters';
+import { fmtBRL, fmtPct, MONTH_NAMES } from '../utils/formatters';
 
 const BLUE = '#378ADD';
 const GREEN = '#639922';
@@ -109,6 +109,17 @@ function MonthlyTooltip({ active, payload, label, transactions }: any) {
           Valoriz. acum.: <span className="font-mono text-gray-900 dark:text-white">{fmtBRL(d.valorizacion_acum)}</span>
         </p>
       )}
+      <p className="text-gray-600 dark:text-gray-400">
+        Aportes netos acum.:{' '}
+        <span
+          className="font-mono"
+          style={{
+            color: (d.net_flow_acum ?? 0) > 0 ? BLUE : (d.net_flow_acum ?? 0) < 0 ? RED : GRAY,
+          }}
+        >
+          {fmtBRL(d.net_flow_acum ?? 0)}
+        </span>
+      </p>
       {monthTxns.length > 0 && (
         <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2">
           <p className="text-xs text-gray-500 mb-1">Movimientos:</p>
@@ -181,11 +192,20 @@ export default function Annual() {
   }));
 
   // ── VISTA MENSUAL ──
-  const monthChartData = (monthlyData?.months ?? []).map(m => ({
+  const monthsWithAccum = (monthlyData?.months ?? []).reduce(
+    (acc: (MonthlyPoint & { net_flow_acum: number })[], item, i) => {
+      const prev = i > 0 ? acc[i - 1].net_flow_acum : 0;
+      return [...acc, { ...item, net_flow_acum: prev + (item.net_flow ?? 0) }];
+    },
+    []
+  );
+
+  const monthChartData = monthsWithAccum.map(m => ({
     month: m.month,
     label: MONTH_NAMES[m.month - 1],
     patrimonio: m.patrimonio,
     net_flow: m.net_flow,
+    net_flow_acum: m.net_flow_acum,
     valorizacion_acum: m.valorizacion_acum,
   }));
 
@@ -198,7 +218,7 @@ export default function Annual() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Crecimiento de Patrimonio</h1>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Análisis de Patrimonio</h1>
           {latestPatrimonio != null && (
             <p className="text-gray-500 dark:text-gray-400 text-sm mt-0.5">
               Patrimonio actual: <span className="font-semibold text-gray-900 dark:text-white">{fmtBRL(latestPatrimonio)}</span>
@@ -475,43 +495,6 @@ export default function Annual() {
                 </div>
               </div>
 
-              {/* Transactions list */}
-              <div className="card">
-                <h2 className="font-semibold text-gray-900 dark:text-white mb-4">Movimientos del año {selectedYear}</h2>
-                {monthlyTransactions.length === 0 ? (
-                  <div className="text-center py-6">
-                    <p className="text-gray-500 dark:text-gray-400">Sin movimientos registrados para este año</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                      Los movimientos históricos provienen de datos importados
-                    </p>
-                  </div>
-                ) : (
-                  <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {monthlyTransactions.map((t, i) => (
-                      <div key={i} className="flex items-center justify-between py-3">
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-gray-500 dark:text-gray-400 w-20">{fmtDate(t.date)}</span>
-                          <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
-                            t.type === 'aplicacion'
-                              ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                              : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                          }`}>
-                            {t.type === 'aplicacion' ? 'aporte' : 'rescate'}
-                          </span>
-                          <span className="text-sm text-gray-700 dark:text-gray-300">{t.instrument_name}</span>
-                        </div>
-                        <span className={`font-mono text-sm font-semibold ${
-                          t.type === 'aplicacion'
-                            ? 'text-green-600 dark:text-green-400'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}>
-                          {t.type === 'aplicacion' ? '+' : '-'}{fmtBRL(Math.abs(t.amount_brl))}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </>
           ) : null}
         </>

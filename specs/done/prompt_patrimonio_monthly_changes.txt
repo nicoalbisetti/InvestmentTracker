@@ -1,0 +1,185 @@
+=============================================================================
+INVESTMENT TRACKER — AJUSTES VISTA MENSUAL / ANÁLISIS DE PATRIMONIO
+Especificación de cambios puntuales sobre la página /annual
+Especificación completa para Claude Code
+=============================================================================
+
+INSTRUCCIONES DE TRABAJO PARA CLAUDE CODE
+------------------------------------------
+Leer CONTEXT.md y este archivo completo antes de escribir cualquier código.
+El archivo relevante a modificar es: frontend/src/pages/Annual.tsx (o GrowthAnnual.tsx
+si ya fue renombrado — verificar con `ls frontend/src/pages/`).
+
+PASO 0 — Setup obligatorio
+---------------------------
+a) Crear TASKS.md en la raíz con todas las tareas como checkboxes.
+   No iniciar el desarrollo hasta tener el TASKS.md completo.
+
+b) Crear lista en ClickUp dentro del folder InvestmentTracker (folder_id: 90177874339):
+     clickup_create_list_in_folder(
+       folder_id="90177874339",
+       name="Feature — Ajustes Vista Mensual Patrimonio"
+     )
+
+c) Crear una tarea por ítem del TASKS.md con clickup_create_task.
+
+d) Guardar este spec en el repositorio:
+     mv prompt_patrimonio_monthly_changes.txt specs/pending/
+     git add specs/pending/prompt_patrimonio_monthly_changes.txt
+     git commit -m "docs: add spec for ajustes vista mensual patrimonio"
+     git push
+
+e) Recién después iniciar el desarrollo.
+   Marcar cada tarea como completada en ClickUp al terminarla.
+
+
+=============================================================================
+1. CONTEXTO
+=============================================================================
+
+La página /annual tiene dos vistas: Anual y Mensual.
+Esta spec aplica ÚNICAMENTE cambios sobre la vista mensual y el título de la ventana.
+No tocar la vista anual ni la lógica de backend.
+
+
+=============================================================================
+2. CAMBIOS REQUERIDOS
+=============================================================================
+
+── CAMBIO 1: Título de la ventana ──────────────────────────────────────────
+
+ANTES: "Crecimiento de Patrimonio" (o "Análisis Anual" si no fue cambiado aún)
+DESPUÉS: "Análisis de Patrimonio"
+
+Ubicación: encabezado del componente (el <h1> o <title> principal de la página),
+visible en ambas vistas (anual y mensual).
+
+No renombrar archivos, rutas ni componentes React — solo el texto visible del título.
+
+
+── CAMBIO 2: Eliminar lista de movimientos de la vista mensual ──────────────
+
+ANTES: debajo del gráfico de líneas existe una sección "Movimientos del año"
+que lista todas las transactions del año seleccionado con fecha, badge tipo,
+instrument_name y amount_brl.
+
+DESPUÉS: eliminar completamente esa sección del JSX.
+
+Qué eliminar:
+  - El bloque JSX de la lista de movimientos (título + map de transactions
+    + mensaje "Sin movimientos registrados...")
+  - La nota en gris sobre datos históricos si estaba dentro de esa sección
+  - NO eliminar la variable monthlyData.transactions — aún se usa en el
+    Dot personalizado del gráfico para colorear puntos según si hubo
+    movimiento ese mes
+
+Verificar: después de eliminar, el gráfico de líneas debe seguir funcionando
+correctamente con su lógica de puntos de color en meses con movimientos.
+
+
+── CAMBIO 3: Agregar aportes netos en el tooltip del gráfico mensual ────────
+
+El tooltip actual del gráfico de líneas (LineChart Recharts) muestra:
+  - Patrimonio del mes
+  - Valorización acumulada del mes
+  - Si hay movimientos ese mes: lista de transacciones
+
+DESPUÉS: agregar una línea adicional con los aportes netos acumulados del año
+hasta ese mes.
+
+Nombre a mostrar en el tooltip: "Aportes netos acum."
+Valor: net_flow acumulado del mes, formateado con fmtBRL
+Color del valor: azul (#378ADD) si > 0, rojo (#E24B4A) si < 0, gris si = 0
+
+Ubicación en el tooltip: entre "Valorización acumulada" y la lista de
+movimientos (si la hubiera).
+
+Dato a usar: el campo net_flow_acum (o el equivalente disponible en cada
+punto de la serie mensual — verificar en monthlyData.items cómo está
+nombrado el net_flow acumulado mes a mes).
+
+  Si el campo no existe en monthlyData.items:
+    → Calcularlo en el frontend acumulando net_flow de cada mes en orden,
+      antes de pasarlo al gráfico:
+
+      const itemsWithAccum = monthlyData.items.reduce((acc, item, i) => {
+        const prev = i > 0 ? acc[i - 1].net_flow_acum : 0;
+        return [...acc, { ...item, net_flow_acum: prev + (item.net_flow ?? 0) }];
+      }, [] as typeof monthlyData.items);
+
+    → Usar itemsWithAccum como data del LineChart en lugar de monthlyData.items
+
+
+=============================================================================
+3. RESUMEN DE CAMBIOS POR ARCHIVO
+=============================================================================
+
+frontend/src/pages/Annual.tsx (o GrowthAnnual.tsx):
+
+  [CAMBIO 1] Título
+    - Localizar el texto del encabezado principal
+    - Reemplazar por "Análisis de Patrimonio"
+
+  [CAMBIO 2] Eliminar lista de movimientos
+    - Localizar la sección JSX de "Movimientos del año"
+    - Eliminar todo el bloque (título, map, fallback, nota)
+    - NO tocar la variable monthlyData.transactions usada en el Dot del gráfico
+
+  [CAMBIO 3] Tooltip del gráfico mensual
+    - Localizar el CustomTooltip (o contenido del Tooltip de Recharts) del LineChart
+    - Agregar línea "Aportes netos acum." con el valor net_flow_acum formateado
+    - Si net_flow_acum no existe en los datos: calcular con reduce antes del render
+      y usar el array resultante como data del LineChart
+
+Sin cambios en: backend, endpoints, lógica anual, router, otros componentes.
+
+
+=============================================================================
+4. CRITERIOS DE ACEPTACIÓN
+=============================================================================
+
+[ ] El título de la página muestra "Análisis de Patrimonio" en ambas vistas
+[ ] La sección "Movimientos del año" no aparece en la vista mensual
+[ ] El gráfico de líneas mensual sigue coloreando puntos en meses con
+    movimientos (verde aporte, rojo rescate) — no regresión
+[ ] El tooltip del gráfico mensual muestra "Aportes netos acum." con valor
+    formateado en fmtBRL y color condicional (azul/rojo/gris)
+[ ] Si no hay aportes netos ese mes (net_flow_acum == 0 o null), mostrar R$ 0
+    o no mostrar la línea (elegir la opción más limpia visualmente)
+[ ] No hay errores de TypeScript ni de consola
+
+
+=============================================================================
+TASKS.md — Lista de tareas
+=============================================================================
+
+- [ ] PASO 0: Crear TASKS.md, lista y tareas en ClickUp, commitear spec
+- [ ] FRONTEND: Cambiar título de la ventana a "Análisis de Patrimonio"
+- [ ] FRONTEND: Eliminar bloque JSX "Movimientos del año" de la vista mensual
+- [ ] FRONTEND: Verificar que el Dot personalizado del gráfico sigue usando
+      monthlyData.transactions correctamente
+- [ ] FRONTEND: Agregar net_flow_acum al tooltip del gráfico mensual
+      (calcular en frontend si el campo no existe en la API)
+- [ ] QA: Verificar todos los criterios de aceptación
+- [ ] PASO FINAL: Commit, push, actualizar CONTEXT.md si aplica, Slack
+
+=============================================================================
+PASO FINAL — Al terminar toda la implementación
+=============================================================================
+
+1. git add -A
+   git commit -m "feat(annual): ajustes vista mensual y título de patrimonio
+
+   - Cambia título a 'Análisis de Patrimonio'
+   - Elimina lista de movimientos del año de la vista mensual
+   - Agrega aportes netos acumulados en tooltip del gráfico mensual"
+   git push
+
+2. Actualizar CONTEXT.md si la sección de /annual describe la vista mensual
+   con la lista de movimientos — actualizar para reflejar que ya no existe.
+
+3. Enviar mensaje de cierre al canal Slack #claudio-coding (channel_id: C0AMM733V1Q).
+
+=============================================================================
+FIN DE LA ESPECIFICACIÓN
+=============================================================================

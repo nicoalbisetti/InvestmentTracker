@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 03 May 2026 (actualizado: Edición inline de unit_price en Posiciones — PATCH /unit-price, recálculo en cascada BRL/USD, fallback usd_rate, sync snapshot).
+> Refleja el estado REAL del código al 04 May 2026 (actualizado: Ajustes Vista Mensual Patrimonio — título "Análisis de Patrimonio", elimina lista movimientos, agrega aportes netos acum. en tooltip mensual).
 
 ---
 
@@ -559,10 +559,10 @@ el valor aumentó vs el período anterior; filas sin ningún valor ocultas; fila
 Nota: también existe endpoint legacy para historial de un instrumento (`/api/history/{id}`) usado internamente.
 **API:** `/api/history/monthly`, `/api/history/annual`, `/api/history/{id}`, `/api/history/compare`
 
-### Annual (`/annual`) — Crecimiento de Patrimonio
+### Annual (`/annual`) — Análisis de Patrimonio
 Dos vistas con toggle Anual/Mensual.
 **Vista Anual:** 4 cards de métricas (total aportado, ganado por mercado, CAGR, mejor año); gráfico de barras agrupadas (Recharts ComposedChart) con aportes netos + valorización por año y línea de patrimonio fin en eje Y derecho; tabla con columnas: Año | Inicio | Aportes netos | Valorización | Fin | Crecim. | % Valor. | Fuente (⚡ calculated / 📋 legacy). Lógica híbrida por año: usa Transaction si hay datos, AnnualSummary como fallback legacy.
-**Vista Mensual:** selector de año (DESC); 3 cards (patrimonio fin, aportes netos %, valorización %); gráfico de líneas (patrimonio total + valorización acumulada), Dot personalizado en meses con movimientos (verde=aporte, rojo=rescate); lista de movimientos del año.
+**Vista Mensual:** selector de año (DESC); 3 cards (patrimonio fin, aportes netos %, valorización %); gráfico de líneas (patrimonio total + valorización acumulada), Dot personalizado en meses con movimientos (verde=aporte, rojo=rescate); tooltip muestra aportes netos acumulados del año (azul/rojo/gris según valor, calculado con reduce en frontend). Sin lista de movimientos.
 **API:** `/api/annual`, `/api/annual/monthly?year=`
 
 ### Proventos (`/proventos`)
@@ -753,7 +753,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Rescate total de instrumento (ícono en tabla de posiciones para renta fija)
 - [x] Creación manual de instrumento con saldo inicial opcional (modal en Settings → Catálogo)
 - [x] Grilla pagado: celdas previstas en ámbar (*), totales de columna/fila incluyen previstos no pagados, edición pre-popula valor previsto
-- [x] Crecimiento de Patrimonio (/annual): vista anual + mensual con lógica híbrida Transaction/AnnualSummary, gráficos Recharts (barras agrupadas + líneas), indicador de fuente de dato (⚡/📋)
+- [x] Análisis de Patrimonio (/annual): vista anual + mensual con lógica híbrida Transaction/AnnualSummary, gráficos Recharts (barras agrupadas + líneas), indicador de fuente de dato (⚡/📋), tooltip mensual con aportes netos acumulados (net_flow_acum calculado con reduce)
 - [x] Mejoras CRUD Transacciones: filtros por custodio/mes-año/tipo/instrumento, edición de transacciones (modal pre-cargado, instrumento estático), combobox de instrumento reutilizable (InstrumentCombobox), label sidebar /annual → "Análisis de Patrimonio"
 - [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
 - [x] Distribución con porcentajes y gráfico por localización: DonutChart muestra % en tooltip y leyenda; backend agrega by_location; Dashboard agrega tercer donut "Por Localización" (esmeralda=brasil, índigo=exterior)

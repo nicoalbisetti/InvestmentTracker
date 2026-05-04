@@ -1,10 +1,9 @@
-# TASKS — Edición inline de unit_price en Posiciones
+# TASKS — Ajustes Vista Mensual Patrimonio
 
-- [x] PASO 0: Guardar spec, crear lista y tareas en ClickUp, commitear
-- [x] BACKEND: Agregar endpoint PATCH /{mp_id}/unit-price
-- [x] BACKEND: Lógica de recálculo BRL e instrumentos USD con fallback usd_rate
-- [x] BACKEND: Llamar sync_snapshot_for_date al finalizar
-- [x] FRONTEND: Agregar función saveUnitPrice() en Positions.tsx
-- [x] FRONTEND: Hacer celda unit_price clickeable/editable para accion/fii
-- [x] QA: Verificar los 10 criterios de aceptación
-- [x] PASO FINAL: Commit, actualizar CONTEXT.md, mover spec, Slack
+- [ ] PASO 0: Crear TASKS.md, lista y tareas en ClickUp
+- [ ] FRONTEND: Cambiar título de la ventana a "Análisis de Patrimonio"
+- [ ] FRONTEND: Eliminar bloque JSX "Movimientos del año" de la vista mensual
+- [ ] FRONTEND: Verificar que el Dot personalizado del gráfico sigue usando monthlyData.transactions correctamente
+- [ ] FRONTEND: Agregar net_flow_acum al tooltip del gráfico mensual (calcular en frontend con reduce)
+- [ ] QA: Verificar todos los criterios de aceptación
+- [ ] PASO FINAL: Commit, push, actualizar CONTEXT.md, mover spec, Slack
