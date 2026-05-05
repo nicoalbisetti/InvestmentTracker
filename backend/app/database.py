@@ -78,6 +78,42 @@ def _migrate_return_source(eng):
                 pass
 
 
+def _migrate_portfolio_snapshot_pk(eng):
+    """Fix portfolio_snapshots.id from INT to INTEGER so SQLite treats it as a rowid alias (autoincrement)."""
+    from sqlalchemy import text
+    with eng.connect() as conn:
+        row = conn.execute(text(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='portfolio_snapshots'"
+        )).fetchone()
+        if row and row[0] and 'id INT,' in row[0]:
+            conn.execute(text("""
+                CREATE TABLE portfolio_snapshots_new (
+                    id INTEGER PRIMARY KEY,
+                    date NUM UNIQUE,
+                    total_brl REAL,
+                    total_without_b3 REAL,
+                    total_usd REAL,
+                    usd_rate REAL,
+                    monthly_change_pct REAL,
+                    hsbc_total REAL,
+                    bradesco_total REAL,
+                    xp_br_total REAL,
+                    xp_us_total REAL,
+                    santander_total REAL,
+                    inter_total REAL,
+                    brasil_total REAL,
+                    fgts REAL,
+                    prev REAL,
+                    usa_total REAL
+                )
+            """))
+            conn.execute(text("INSERT INTO portfolio_snapshots_new SELECT * FROM portfolio_snapshots"))
+            conn.execute(text("DROP TABLE portfolio_snapshots"))
+            conn.execute(text("ALTER TABLE portfolio_snapshots_new RENAME TO portfolio_snapshots"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_portfolio_snapshots_date ON portfolio_snapshots (date)"))
+            conn.commit()
+
+
 def create_tables():
     # Import all models so Base knows about them
     from app.models import (  # noqa: F401

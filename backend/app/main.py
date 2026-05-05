@@ -38,11 +38,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    from app.database import engine as main_engine, demo_engine, _migrate_provento_items, _migrate_return_source
+    from app.database import engine as main_engine, demo_engine, _migrate_provento_items, _migrate_return_source, _migrate_portfolio_snapshot_pk
     _migrate_provento_items(main_engine)
     _migrate_provento_items(demo_engine)
     _migrate_return_source(main_engine)
     _migrate_return_source(demo_engine)
+    _migrate_portfolio_snapshot_pk(main_engine)
+    _migrate_portfolio_snapshot_pk(demo_engine)
     create_tables()
 
 
