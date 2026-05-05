@@ -167,9 +167,15 @@ def main():
                 qty = cfg["qty"]
                 drift = 1.0 + random.uniform(-0.02, 0.02)
                 balance_brl = round(qty * up * drift, 2)
-                balance_usd = round(balance_brl / snap_usd_rate, 2) if snap_usd_rate and inst["currency"] == "USD" else None
+                balance_usd = round(balance_brl / snap_usd_rate, 2) if snap_usd_rate else None
                 unit_price = round(up * drift, 4)
                 quantity = qty
+                # Fake avg_price: unit_price shifted by a stable per-instrument factor
+                avg_factor = inst_config[iid].get("avg_factor")
+                if avg_factor is None:
+                    avg_factor = 1.0 + random.uniform(-0.25, 0.15)
+                    inst_config[iid]["avg_factor"] = avg_factor
+                avg_price = round(up * avg_factor, 4)
             elif cfg["mode"] == "price":
                 # price-based instrument but no unit_price for this historical date — skip
                 continue
@@ -177,20 +183,21 @@ def main():
                 # Balance-based: slight monthly drift
                 drift = 1.0 + random.uniform(-0.01, 0.015) * (i + 1) / len(inst_dates)
                 balance_brl = round(cfg["base"] * drift, 2)
-                balance_usd = round(balance_brl / snap_usd_rate, 2) if snap_usd_rate and inst["currency"] == "USD" else None
+                balance_usd = round(balance_brl / snap_usd_rate, 2) if snap_usd_rate else None
                 unit_price = None
                 quantity = None
+                avg_price = None
 
             demo_positions.append((
                 iid, dt,
                 balance_brl, balance_usd,
-                snap_usd_rate, unit_price, quantity,
+                snap_usd_rate, unit_price, quantity, avg_price,
             ))
 
     dst.executemany("""
         INSERT INTO monthly_positions
-            (instrument_id, date, balance_brl, balance_usd, usd_rate, unit_price, quantity)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+            (instrument_id, date, balance_brl, balance_usd, usd_rate, unit_price, quantity, avg_price)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, demo_positions)
     dst.commit()
     print(f"Generated {len(demo_positions)} fake monthly_positions.")
