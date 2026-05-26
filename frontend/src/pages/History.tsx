@@ -256,9 +256,10 @@ export default function History() {
               ))}
             </div>
             <button
-              className="btn-secondary text-sm p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              className="btn-secondary text-sm p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed"
               onClick={exportHistoryCSV}
               title="Exportar CSV"
+              disabled={items.length === 0}
             >
               <Download size={18} />
             </button>
