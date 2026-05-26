@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 04 May 2026 (actualizado: Ajustes Vista Mensual Patrimonio — título "Análisis de Patrimonio", elimina lista movimientos, agrega aportes netos acum. en tooltip mensual).
+> Refleja el estado REAL del código al 25 May 2026 (actualizado: Export CSV en Histórico de Posiciones).
 
 ---
 
@@ -556,6 +556,10 @@ Vista Mensual: 12 columnas (Ene–Dic) para el año seleccionado.
 Vista Anual: hasta 10 columnas (últimos años con datos, valor de diciembre o último mes disponible).
 Comportamiento: filas ordenadas por mercado (brasil→exterior) y tipo (TYPE_ORDER); celdas en verde si
 el valor aumentó vs el período anterior; filas sin ningún valor ocultas; fila de totales fija arriba (en thead).
+**Export CSV:** botón Download (ícono lucide-react) en la barra de controles, junto al toggle BRL/USD.
+Genera CSV client-side desde el estado React (sin llamada al backend). Respeta todos los filtros activos,
+incluido el filtro de texto. Valores numéricos crudos (sin formato). Nombre: `historico_mensual_<year>_<currency>.csv`
+o `historico_anual_<currency>.csv`. Botón deshabilitado si no hay datos visibles.
 Nota: también existe endpoint legacy para historial de un instrumento (`/api/history/{id}`) usado internamente.
 **API:** `/api/history/monthly`, `/api/history/annual`, `/api/history/{id}`, `/api/history/compare`
 
@@ -729,7 +733,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Dashboard con KPIs, evolución, distribución, benchmarks (CDI/IPCA), top/bottom, vencimientos
 - [x] Posiciones: filtros, paginación, sort (default: brasil→exterior→tipo→nombre), export CSV
 - [x] Historial por instrumento: gráficos, CAGR, drawdown, volatility, comparación multi
-- [x] Histórico matriz mensual/anual: instrumento × período, filtros instrumento/custodio/tipo/mercado, BRL/USD toggle
+- [x] Histórico matriz mensual/anual: instrumento × período, filtros instrumento/custodio/tipo/mercado, BRL/USD toggle, export CSV client-side
 - [x] Resumen anual: tabla + gráfico apilado
 - [x] Proventos: tabla histórica (año actual desde provento_items + forecast), gráfico barras apiladas (Pagado + Previsto), grilla editable, previsión
 - [x] Importador Fixed Income (renta fija): wizard 3 pasos, diff preview, cross-custodio, mapeo manual
@@ -776,20 +780,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 
 ---
 
-## 11. Convención de Trabajo — PASO 0
-
-Antes de escribir cualquier código para una nueva feature, siempre ejecutar:
-
-a) Crear `TASKS.md` en la raíz con todas las tareas en checkboxes
-b) Crear lista en ClickUp dentro del folder InvestmentTracker (`folder_id: 90177874339`) con `clickup_create_list_in_folder`
-c) Crear una tarea en ClickUp por cada item del TASKS.md con `clickup_create_task`
-d) Recién después iniciar el desarrollo; marcar tareas como completadas a medida que avanza
-
-Esto está documentado en `.claude/CLAUDE.md`.
-
----
-
-## 12. Notas Importantes para Futuros Features
+## 11. Notas Importantes para Futuros Features
 
 ### Sin Alembic — migraciones manuales
 No hay Alembic. Para cambiar schema:
