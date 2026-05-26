@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Download } from 'lucide-react';
 import { getMonthlyHistory, getAnnualHistory, HistoryFilters, HistoryMonthlyResponse, HistoryAnnualResponse } from '../api/history';
 import { getInstruments } from '../api/instruments';
 import { fmtBRL, fmtUSD, MONTH_NAMES } from '../utils/formatters';
@@ -180,6 +181,31 @@ export default function History() {
   const headerBg = 'bg-gray-50 dark:bg-gray-800';
   const cellClass = 'px-3 py-1.5 text-right font-mono text-xs whitespace-nowrap';
 
+  const exportHistoryCSV = () => {
+    const header = ['Instrumento', ...periods.map(p => String(p))];
+    const totalRow = ['Total', ...totals.map(v => (v === null || v === 0) ? '' : String(v))];
+    const rows = items.map(item => [
+      item.name,
+      ...item.values.map(v => (v === null || v === 0) ? '' : String(v)),
+    ]);
+
+    const csvContent = [header, totalRow, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+
+    const filename = view === 'monthly'
+      ? `historico_mensual_${year}_${currency}.csv`
+      : `historico_anual_${currency}.csv`;
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-4">
       {/* Controls */}
@@ -229,6 +255,13 @@ export default function History() {
                 </button>
               ))}
             </div>
+            <button
+              className="btn-secondary text-sm p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              onClick={exportHistoryCSV}
+              title="Exportar CSV"
+            >
+              <Download size={18} />
+            </button>
           </div>
         </div>
 
