@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models.equity_trade import EquityTrade
 from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
+from app.models.quote import Quote
 from app.schemas.equity_trade import (
     EquityTradeCreate,
     EquityTradeOut,
@@ -28,12 +29,29 @@ def _trade_to_out(trade: EquityTrade) -> dict:
         "trade_type": trade.trade_type,
         "quantity": trade.quantity,
         "price": trade.price,
+        "usd_rate": trade.usd_rate,
         "amount_brl": trade.amount_brl,
         "notes": trade.notes,
         "created_at": trade.created_at,
         "instrument_name": trade.instrument.name if trade.instrument else "",
         "instrument_ticker": trade.instrument.ticker if trade.instrument else None,
+        "instrument_currency": trade.instrument.currency if trade.instrument else "BRL",
     }
+
+
+def _resolve_usd_rate(
+    instrument: Instrument,
+    trade_date: date,
+    provided_rate: Optional[float],
+    db: Session,
+) -> Optional[float]:
+    if instrument.currency != "USD":
+        return None
+    if provided_rate is not None:
+        return provided_rate
+    month_start = date(trade_date.year, trade_date.month, 1)
+    q = db.query(Quote).filter(Quote.date == month_start).first()
+    return q.usd_brl if q and q.usd_brl else None
 
 
 @router.get("/summary/{instrument_id}", response_model=EquityTradeSummary)
@@ -42,12 +60,12 @@ def get_summary(instrument_id: int, db: Session = Depends(get_db)):
     if not instrument:
         raise HTTPException(status_code=404, detail="Instrumento no encontrado")
 
+    is_usd = instrument.currency == "USD"
     trades = db.query(EquityTrade).filter(EquityTrade.instrument_id == instrument_id).all()
 
     total_compras_qty = sum(t.quantity for t in trades if t.trade_type == "compra")
     total_ventas_qty = sum(t.quantity for t in trades if t.trade_type == "venta")
 
-    # Usar el mp más reciente para obtener cantidad actual y avg_price (respetando arrastre histórico)
     last_mp = (
         db.query(MonthlyPosition)
         .filter(MonthlyPosition.instrument_id == instrument_id)
@@ -57,7 +75,6 @@ def get_summary(instrument_id: int, db: Session = Depends(get_db)):
     qty_actual = last_mp.quantity if last_mp and last_mp.quantity is not None else 0.0
     avg_price_compra = last_mp.avg_price if last_mp else None
 
-    # Último precio: unit_price del mp más reciente que tenga precio
     last_priced_mp = (
         db.query(MonthlyPosition)
         .filter(
@@ -68,6 +85,16 @@ def get_summary(instrument_id: int, db: Session = Depends(get_db)):
         .first()
     )
     ultimo_precio = last_priced_mp.unit_price if last_priced_mp else None
+
+    usd_rate_last = None
+    if is_usd:
+        if last_priced_mp and last_priced_mp.usd_rate:
+            usd_rate_last = last_priced_mp.usd_rate
+        else:
+            from datetime import date as date_type
+            today = date_type.today()
+            q = db.query(Quote).filter(Quote.date == date(today.year, today.month, 1)).first()
+            usd_rate_last = q.usd_brl if q and q.usd_brl else None
 
     pl_no_realizado = None
     pl_no_realizado_pct = None
@@ -81,11 +108,14 @@ def get_summary(instrument_id: int, db: Session = Depends(get_db)):
         instrument_id=instrument_id,
         instrument_name=instrument.name,
         instrument_ticker=instrument.ticker,
+        currency=instrument.currency,
+        is_usd=is_usd,
         total_compras_qty=total_compras_qty,
         total_ventas_qty=total_ventas_qty,
         qty_actual=qty_actual,
         avg_price_compra=avg_price_compra,
         ultimo_precio=ultimo_precio,
+        usd_rate_last=usd_rate_last,
         pl_no_realizado=pl_no_realizado,
         pl_no_realizado_pct=pl_no_realizado_pct,
     )
@@ -128,7 +158,14 @@ def create_trade(body: EquityTradeCreate, db: Session = Depends(get_db)):
     if not instrument:
         raise HTTPException(status_code=404, detail="Instrumento no encontrado")
 
-    amount_brl = body.quantity * body.price
+    usd_rate = _resolve_usd_rate(instrument, body.date, body.usd_rate, db)
+    if instrument.currency == "USD" and usd_rate is None:
+        raise HTTPException(
+            status_code=422,
+            detail="No hay cotización USD/BRL para ese mes. Ingresá el rate manualmente.",
+        )
+
+    amount_brl = body.quantity * body.price * usd_rate if usd_rate else body.quantity * body.price
 
     trade = EquityTrade(
         instrument_id=body.instrument_id,
@@ -136,6 +173,7 @@ def create_trade(body: EquityTradeCreate, db: Session = Depends(get_db)):
         trade_type=body.trade_type,
         quantity=body.quantity,
         price=body.price,
+        usd_rate=usd_rate,
         amount_brl=amount_brl,
         notes=body.notes,
         created_at=datetime.utcnow(),
@@ -180,7 +218,21 @@ def update_trade(trade_id: int, body: EquityTradeUpdate, db: Session = Depends(g
     if body.notes is not None:
         trade.notes = body.notes
 
-    trade.amount_brl = trade.quantity * trade.price
+    instrument = db.query(Instrument).filter(Instrument.id == trade.instrument_id).first()
+    usd_rate = _resolve_usd_rate(instrument, trade.date, body.usd_rate, db)
+    if instrument and instrument.currency == "USD" and usd_rate is None:
+        raise HTTPException(
+            status_code=422,
+            detail="No hay cotización USD/BRL para ese mes. Ingresá el rate manualmente.",
+        )
+
+    if usd_rate is not None:
+        trade.usd_rate = usd_rate
+    trade.amount_brl = (
+        trade.quantity * trade.price * trade.usd_rate
+        if trade.usd_rate
+        else trade.quantity * trade.price
+    )
 
     from_date = min(old_date, trade.date)
     db.flush()
