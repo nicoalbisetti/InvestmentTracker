@@ -26,6 +26,7 @@ export default function EquityTradeSummaryCard({ instrumentId }: Props) {
 
   if (!summary) return null;
 
+  const isUsd = summary.is_usd;
   const plPositive = summary.pl_no_realizado != null && summary.pl_no_realizado >= 0;
   const plColor = summary.pl_no_realizado == null
     ? 'text-gray-400'
@@ -34,22 +35,32 @@ export default function EquityTradeSummaryCard({ instrumentId }: Props) {
   const fmtBRL = (v: number | null) =>
     v == null ? '—' : v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 
+  const fmtUSD = (v: number | null) =>
+    v == null ? '—' : `USD ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
   const fmtQty = (v: number) =>
     v.toLocaleString('pt-BR', { maximumFractionDigits: 4 });
 
   const fmtPrice = (v: number | null) =>
     v == null ? '—' : v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+  const plBrl = isUsd && summary.pl_no_realizado != null && summary.usd_rate_last
+    ? summary.pl_no_realizado * summary.usd_rate_last
+    : null;
+
   return (
     <div className="card border border-gray-200 dark:border-gray-700">
       <div className="flex items-center justify-between mb-3">
-        <div>
+        <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-gray-800 dark:text-gray-200">
             {summary.instrument_ticker && (
               <span className="font-mono text-indigo-600 dark:text-indigo-400 mr-1.5">{summary.instrument_ticker}</span>
             )}
             {summary.instrument_name}
           </span>
+          {isUsd && (
+            <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-semibold">USD</span>
+          )}
         </div>
         {summary.qty_actual < 0 && (
           <span className="text-xs bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-400 px-2 py-0.5 rounded-full border border-rose-200 dark:border-rose-700 font-semibold">
@@ -67,25 +78,47 @@ export default function EquityTradeSummaryCard({ instrumentId }: Props) {
         <div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Precio prom. compra</p>
           <p className="font-mono font-semibold text-gray-800 dark:text-gray-200">
-            R$ {fmtPrice(summary.avg_price_compra)}
+            {isUsd
+              ? fmtUSD(summary.avg_price_compra)
+              : `R$ ${fmtPrice(summary.avg_price_compra)}`}
           </p>
         </div>
         <div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Último precio</p>
           <p className="font-mono font-semibold text-gray-800 dark:text-gray-200">
-            R$ {fmtPrice(summary.ultimo_precio)}
+            {isUsd
+              ? fmtUSD(summary.ultimo_precio)
+              : `R$ ${fmtPrice(summary.ultimo_precio)}`}
           </p>
         </div>
         <div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">P&L no realizado</p>
-          <p className={`font-mono font-semibold ${plColor}`}>
-            {fmtBRL(summary.pl_no_realizado)}
-            {summary.pl_no_realizado_pct != null && (
-              <span className="ml-1 text-xs">
-                ({summary.pl_no_realizado_pct >= 0 ? '+' : ''}{summary.pl_no_realizado_pct.toFixed(2)}%)
-              </span>
-            )}
-          </p>
+          {isUsd ? (
+            <div>
+              <p className={`font-mono font-semibold ${plColor}`}>
+                {fmtUSD(summary.pl_no_realizado)}
+                {summary.pl_no_realizado_pct != null && (
+                  <span className="ml-1 text-xs">
+                    ({summary.pl_no_realizado_pct >= 0 ? '+' : ''}{summary.pl_no_realizado_pct.toFixed(2)}%)
+                  </span>
+                )}
+              </p>
+              {plBrl != null && (
+                <p className="text-xs text-gray-400 dark:text-gray-500 font-mono mt-0.5">
+                  ≈ {fmtBRL(plBrl)}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className={`font-mono font-semibold ${plColor}`}>
+              {fmtBRL(summary.pl_no_realizado)}
+              {summary.pl_no_realizado_pct != null && (
+                <span className="ml-1 text-xs">
+                  ({summary.pl_no_realizado_pct >= 0 ? '+' : ''}{summary.pl_no_realizado_pct.toFixed(2)}%)
+                </span>
+              )}
+            </p>
+          )}
         </div>
       </div>
     </div>
