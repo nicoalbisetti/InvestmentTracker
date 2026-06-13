@@ -114,6 +114,16 @@ def _migrate_portfolio_snapshot_pk(eng):
             conn.commit()
 
 
+def _migrate_equity_trades_usd(eng):
+    """Add usd_rate column to equity_trades if it doesn't exist."""
+    from sqlalchemy import text
+    with eng.connect() as conn:
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(equity_trades)"))]
+        if "usd_rate" not in cols:
+            conn.execute(text("ALTER TABLE equity_trades ADD COLUMN usd_rate REAL"))
+            conn.commit()
+
+
 def create_tables():
     # Import all models so Base knows about them
     from app.models import (  # noqa: F401
