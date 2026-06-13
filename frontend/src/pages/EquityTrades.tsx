@@ -65,7 +65,6 @@ export default function EquityTrades() {
 
   // Filter state
   const [filterInstrumentId, setFilterInstrumentId] = useState<number | null>(preselectedId);
-  const [filterInstrumentLabel, setFilterInstrumentLabel] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -93,7 +92,6 @@ export default function EquityTrades() {
       client.get(`/api/instruments/${preselectedId}`)
         .then(r => {
           const inst = r.data;
-          setFilterInstrumentLabel(inst.ticker ? `${inst.ticker} — ${inst.name}` : inst.name);
           setInstrSearch(inst.ticker ? `${inst.ticker} — ${inst.name}` : inst.name);
         })
         .catch(() => {});
@@ -201,7 +199,7 @@ export default function EquityTrades() {
               value={instrSearch}
               onChange={e => {
                 setInstrSearch(e.target.value);
-                if (!e.target.value) { setFilterInstrumentId(null); setFilterInstrumentLabel(''); }
+                if (!e.target.value) { setFilterInstrumentId(null); }
               }}
               onFocus={() => instrOptions.length > 0 && setShowInstrDropdown(true)}
               autoComplete="off"
@@ -216,7 +214,6 @@ export default function EquityTrades() {
                     onClick={() => {
                       setFilterInstrumentId(inst.id);
                       const label = inst.ticker ? `${inst.ticker} — ${inst.name}` : inst.name;
-                      setFilterInstrumentLabel(label);
                       setInstrSearch(label);
                       setShowInstrDropdown(false);
                       setPage(1);
@@ -257,7 +254,6 @@ export default function EquityTrades() {
               className="btn-secondary text-sm"
               onClick={() => {
                 setFilterInstrumentId(null);
-                setFilterInstrumentLabel('');
                 setInstrSearch('');
                 setFilterDateFrom('');
                 setFilterDateTo('');
