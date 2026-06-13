@@ -780,26 +780,65 @@ export default function Proventos() {
                         <td className="px-3 py-2.5 text-xs text-gray-500 uppercase sticky left-0 bg-slate-50 dark:bg-slate-800">Total</td>
                         <td />
                         <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-200">{fmtBRL(data.balance_total)}</td>
-                        {years.map(y => (
-                          <td key={y} className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                            {data.year_totals[y] ? fmtBRL(data.year_totals[y]) : '—'}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                          {fmtBRL(Object.values(data.year_totals as Record<number, number>).reduce((s, v) => s + (v || 0), 0))}
-                        </td>
+                        {years.map(y => {
+                          const yieldPct = data.balance_total && data.year_totals[y]
+                            ? ((data.year_totals[y] / data.balance_total) * 100).toFixed(2) + '%'
+                            : null;
+                          return (
+                            <td key={y} className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400"
+                              title={yieldPct ? `Yield ${y}: ${yieldPct}` : undefined}>
+                              {data.year_totals[y] ? fmtBRL(data.year_totals[y]) : '—'}
+                            </td>
+                          );
+                        })}
+                        {(() => {
+                          const grandTotal = Object.values(data.year_totals as Record<number, number>).reduce((s, v) => s + (v || 0), 0);
+                          const yieldPct = data.balance_total && grandTotal
+                            ? ((grandTotal / data.balance_total) * 100).toFixed(2) + '%'
+                            : null;
+                          return (
+                            <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400"
+                              title={yieldPct ? `Yield total: ${yieldPct}` : undefined}>
+                              {fmtBRL(grandTotal)}
+                            </td>
+                          );
+                        })()}
                       </tr>
                       {data.items.map((row: any) => (
                         <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                           <td className="px-3 py-2.5 font-medium max-w-[160px] truncate sticky left-0 bg-white dark:bg-gray-900" title={row.name}>{row.name}</td>
                           <td className="px-3 py-2.5 text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{row.type}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-gray-600">{fmtBRL(row.balance_brl)}</td>
-                          {years.map(y => (
-                            <td key={y} className={`px-3 py-2.5 text-right font-mono ${row.years[y] ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-300 dark:text-gray-600'}`}>
-                              {row.years[y] ? fmtBRL(row.years[y]) : '—'}
-                            </td>
-                          ))}
-                          <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">{fmtBRL(row.total)}</td>
+                          {years.map(y => {
+                            const currentYear = new Date().getFullYear();
+                            const balanceForYear = y < currentYear
+                              ? (row.balance_by_year?.[y] ?? null)
+                              : row.balance_brl;
+                            const yieldPct = balanceForYear && row.years[y]
+                              ? ((row.years[y] / balanceForYear) * 100).toFixed(2) + '%'
+                              : null;
+                            const tooltipBase = yieldPct ? `Yield ${y}: ${yieldPct}` : undefined;
+                            const tooltip = yieldPct && y < currentYear && row.balance_by_year?.[y]
+                              ? `${tooltipBase} (saldo dic-${y}: ${fmtBRL(balanceForYear)})`
+                              : tooltipBase;
+                            return (
+                              <td key={y} className={`px-3 py-2.5 text-right font-mono ${row.years[y] ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-300 dark:text-gray-600'}`}
+                                title={tooltip}>
+                                {row.years[y] ? fmtBRL(row.years[y]) : '—'}
+                              </td>
+                            );
+                          })}
+                          {(() => {
+                            const yieldPct = row.balance_brl && row.total
+                              ? ((row.total / row.balance_brl) * 100).toFixed(2) + '%'
+                              : null;
+                            return (
+                              <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400"
+                                title={yieldPct ? `Yield total: ${yieldPct}` : undefined}>
+                                {fmtBRL(row.total)}
+                              </td>
+                            );
+                          })()}
                         </tr>
                       ))}
                     </tbody>

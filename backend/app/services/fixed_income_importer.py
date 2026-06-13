@@ -12,6 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.instrument import Instrument
@@ -319,18 +320,24 @@ def parse_excel(file_bytes: bytes, config: ImportConfig) -> Tuple[List[ParsedIns
             quantidade = _safe_float(qtd_raw)
 
             # cols 13/14: MTM price/value; cols 15/16: CURVA price/value
+            # cols 17/18: extra columns used by some CRAs/CRIs not priced via MTM/CURVA
             price_mtm = _safe_float(row.iloc[13]) if len(row) > 13 else None
             valor_mtm = _safe_float(row.iloc[14]) if len(row) > 14 else None
             price_curva = _safe_float(row.iloc[15]) if len(row) > 15 else None
             valor_curva = _safe_float(row.iloc[16]) if len(row) > 16 else None
+            price_extra = _safe_float(row.iloc[17]) if len(row) > 17 else None
+            valor_extra = _safe_float(row.iloc[18]) if len(row) > 18 else None
 
-            # Resolve balance_brl: MTM preferred over CURVA
+            # Resolve balance_brl: MTM > CURVA > extra columns
             if valor_mtm is not None:
                 valor_brl = valor_mtm
                 unit_price = price_mtm
             elif valor_curva is not None:
                 valor_brl = valor_curva
                 unit_price = price_curva
+            elif valor_extra is not None:
+                valor_brl = valor_extra
+                unit_price = price_extra
             else:
                 valor_brl = None
                 unit_price = None
@@ -505,10 +512,12 @@ def compute_diff(
     diff: List[DiffItem] = []
     seen_instrument_ids: set = set()
 
-    # Pre-load ALL renta_fija instruments for auto-matching (include cerrado/sin_datos —
-    # they may still be the correct match for a newly-appearing Excel instrument)
+    # Pre-load renta_fija instruments located in Brazil for auto-matching (include
+    # cerrado/sin_datos — they may still be the correct match for a newly-appearing Excel
+    # instrument). Instruments in "exterior" are excluded: they come from a different import.
     rf_candidates = db.query(Instrument).filter(
         Instrument.type == "renta_fija",
+        or_(Instrument.location == "brasil", Instrument.location.is_(None)),
     ).all()
 
     for p in parsed:
@@ -631,10 +640,11 @@ def compute_diff(
                 warnings=item_warnings,
             ))
 
-    # DISAPPEARED: active renta_fija instruments (same custodian filter) not in the Excel
+    # DISAPPEARED: active renta_fija instruments in Brazil (same custodian filter) not in the Excel
     q_disappeared = db.query(Instrument).filter(
         Instrument.type == "renta_fija",
         Instrument.status == "activo",
+        or_(Instrument.location == "brasil", Instrument.location.is_(None)),
     )
     if config.custodian_filter:
         q_disappeared = q_disappeared.filter(Instrument.custodian == config.custodian_filter)
@@ -756,6 +766,7 @@ def apply_import(
                     asset_class=p.tipo,
                     currency="BRL",
                     status="activo",
+                    location="brasil",
                     in_liquidation=p.in_liquidation,
                 )
                 if config.import_custodian:

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
+from collections import defaultdict
 from app.database import get_db
 from app.models.provento import Provento
 from app.models.provento_forecast import ProventoForecast
@@ -28,6 +29,7 @@ def get_proventos(
     years = list(range(current_year, current_year - 7, -1))
 
     # Get instruments with proventos (from proventos table) OR provento_items (current year)
+    # OR forecast for current year (instruments with no history yet)
     hist_ids = {r[0] for r in (
         db.query(Instrument.id)
         .join(Provento, Provento.instrument_id == Instrument.id)
@@ -40,8 +42,14 @@ def get_proventos(
         .distinct()
         .all()
     )}
+    forecast_ids = {r[0] for r in (
+        db.query(ProventoForecast.instrument_id)
+        .filter(ProventoForecast.year == current_year)
+        .distinct()
+        .all()
+    )}
     all_inst_ids_query = db.query(Instrument.id).filter(
-        Instrument.id.in_(hist_ids | curr_ids)
+        Instrument.id.in_(hist_ids | curr_ids | forecast_ids)
     )
     if status:
         all_inst_ids_query = all_inst_ids_query.filter(Instrument.status == status)
@@ -108,6 +116,31 @@ def get_proventos(
             existing = prov_map.get((inst_id, current_year), 0) or 0
             prov_map[(inst_id, current_year)] = existing + (amt or 0)
 
+    # Historical balance per instrument per year: last available month of each year
+    past_years = [yr for yr in years if yr < current_year]
+    hist_positions = (
+        db.query(MonthlyPosition)
+        .filter(
+            MonthlyPosition.instrument_id.in_(paginated_ids),
+            MonthlyPosition.date >= date(min(past_years), 1, 1),
+            MonthlyPosition.date <= date(max(past_years), 12, 1),
+        )
+        .all()
+    ) if past_years else []
+
+    # {instrument_id: {year: balance_brl}} — keep latest month per year
+    balance_by_year: dict = defaultdict(dict)
+    for pos in hist_positions:
+        y = pos.date.year
+        existing = balance_by_year[pos.instrument_id].get(y)
+        if existing is None or pos.date > existing[0]:
+            balance_by_year[pos.instrument_id][y] = (pos.date, pos.balance_brl)
+    # Flatten to just the balance value
+    balance_by_year = {
+        inst_id: {yr: val[1] for yr, val in yr_map.items()}
+        for inst_id, yr_map in balance_by_year.items()
+    }
+
     instruments = db.query(Instrument).filter(Instrument.id.in_(paginated_ids)).all()
     inst_map = {i.id: i for i in instruments}
 
@@ -122,6 +155,7 @@ def get_proventos(
             "type": inst.type,
             "custodian": inst.custodian,
             "balance_brl": inst.current_balance_brl,
+            "balance_by_year": balance_by_year.get(inst_id, {}),
             "years": {yr: prov_map.get((inst_id, yr)) for yr in years},
             "total": sum(v for v in [prov_map.get((inst_id, yr)) for yr in years] if v),
         }
