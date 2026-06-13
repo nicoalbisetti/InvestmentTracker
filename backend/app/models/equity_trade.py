@@ -14,6 +14,7 @@ class EquityTrade(Base):
     quantity = Column(Float, nullable=False)
     price = Column(Float, nullable=False)
     amount_brl = Column(Float, nullable=True)
+    usd_rate = Column(Float, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
