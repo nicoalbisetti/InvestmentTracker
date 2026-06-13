@@ -162,10 +162,12 @@ export default function EquityTrades() {
               instrument_id: editTrade.instrument_id,
               instrument_name: editTrade.instrument_name,
               instrument_ticker: editTrade.instrument_ticker,
+              instrument_currency: editTrade.instrument_currency,
               date: editTrade.date,
               trade_type: editTrade.trade_type as 'compra' | 'venta',
               quantity: editTrade.quantity,
               price: editTrade.price,
+              usd_rate: editTrade.usd_rate,
               notes: editTrade.notes ?? '',
             }}
             onSubmit={handleEdit}
