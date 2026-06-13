@@ -1,16 +1,25 @@
 import logging
 from datetime import date
 from calendar import monthrange
+from typing import Optional
 
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models.equity_trade import EquityTrade
+from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from app.services.snapshot_sync import sync_snapshot_for_date
 
 logger = logging.getLogger(__name__)
+
+
+def _get_monthly_rate(d: date, db: Session) -> Optional[float]:
+    from app.models.quote import Quote
+    month_start = date(d.year, d.month, 1)
+    q = db.query(Quote).filter(Quote.date == month_start).first()
+    return q.usd_brl if q and q.usd_brl else None
 
 
 def recalculate_equity_positions(instrument_id: int, from_date: date, db: Session) -> int:
@@ -20,6 +29,9 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
     """
     # 1. Normalizar al primer día del mes
     from_month = from_date.replace(day=1)
+
+    instrument = db.query(Instrument).filter(Instrument.id == instrument_id).first()
+    is_usd = instrument.currency == "USD" if instrument else False
 
     # 2. Obtener todas las MonthlyPosition >= from_month ordenadas ASC
     positions = (
@@ -91,7 +103,12 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
 
         # Si hay unit_price, recalcular balance_brl
         if mp.unit_price is not None:
-            mp.balance_brl = round(running_qty * mp.unit_price, 2)
+            if is_usd:
+                rate = mp.usd_rate or _get_monthly_rate(mp.date, db)
+                if rate:
+                    mp.balance_brl = round(running_qty * mp.unit_price * rate, 2)
+            else:
+                mp.balance_brl = round(running_qty * mp.unit_price, 2)
 
         # Calcular gain y gain_pct con Modified Dietz
         prev_month_date = mp.date - relativedelta(months=1)
@@ -104,10 +121,17 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
             .first()
         )
         if prev_mp and prev_mp.balance_brl and prev_mp.balance_brl > 0:
-            net_trade_flow = sum(
-                t.quantity * t.price if t.trade_type == "compra" else -(t.quantity * t.price)
-                for t in trades_of_month
-            )
+            if is_usd:
+                net_trade_flow = sum(
+                    (t.quantity * t.price * (t.usd_rate or 1.0) if t.trade_type == "compra"
+                     else -(t.quantity * t.price * (t.usd_rate or 1.0)))
+                    for t in trades_of_month
+                )
+            else:
+                net_trade_flow = sum(
+                    t.quantity * t.price if t.trade_type == "compra" else -(t.quantity * t.price)
+                    for t in trades_of_month
+                )
             mp.gain = (mp.balance_brl or 0) - (prev_mp.balance_brl or 0) - net_trade_flow
             adjusted_base = (prev_mp.balance_brl or 0) + net_trade_flow * 0.5
             if adjusted_base > 0:
