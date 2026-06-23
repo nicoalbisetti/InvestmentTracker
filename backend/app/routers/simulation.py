@@ -15,7 +15,11 @@ INTERNATIONAL_CUSTODIANS = {"XP_INTERNATIONAL", "XP_INTERNACIONAL"}
 def _classify(instrument: Instrument) -> str | None:
     if instrument.custodian in INTERNATIONAL_CUSTODIANS:
         return "internacional"
-    if instrument.type in ("renta_fija", "accion", "fii", "fundo"):
+    if instrument.type == "renta_fija":
+        return "renta_fija"
+    if instrument.type == "accion" and instrument.custodian not in INTERNATIONAL_CUSTODIANS:
+        return "accion"
+    if instrument.type in ("fii", "fundo"):
         return instrument.type
     return None
 
