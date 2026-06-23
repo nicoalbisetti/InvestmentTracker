@@ -1,0 +1,367 @@
+FEATURE: Simulación de Evolución de Cartera a Futuro
+=====================================================
+
+Objetivo: nueva página /simulacion que proyecta determinísticamente el valor
+del portfolio a futuro, con inputs configurables por el usuario.
+
+Decisiones de diseño confirmadas:
+- Proyección determinística (tasas fijas por clase)
+- 5 clases: renta_fija, accion, fii, fundo, internacional
+- Aportes distribuidos proporcionalmente al peso actual de la cartera
+- Defaults conservadores: RF=13% / Acc=12% / FII=10% / Fondos=11% / Intl=10%
+- Nueva página /simulacion accesible desde el sidebar
+
+Dependencias entre tareas:
+- T-01 debe completarse antes de T-02..T-06 (frontend depende del contrato de API)
+- T-02, T-03, T-04, T-05 pueden desarrollarse en paralelo una vez que T-01 esté listo
+- T-06 depende de T-02..T-05
+- T-07 es el último paso
+
+
+═══════════════════════════════════════════════
+PASO 0 — Setup
+═══════════════════════════════════════════════
+
+0.1 Guardar este spec en `specs/pending/simulacion-portfolio.txt` y hacer
+    commit: `feat: add spec for portfolio simulation page`.
+
+
+═══════════════════════════════════════════════
+T-01 — Endpoint backend GET /api/simulation
+═══════════════════════════════════════════════
+
+Crear nuevo router `backend/routers/simulation.py` e incluirlo en `main.py`.
+
+--- Parámetros de query ---
+
+| Param                    | Tipo  | Default | Descripción                                  |
+|--------------------------|-------|---------|----------------------------------------------|
+| horizon_months           | int   | 60      | Horizonte de proyección (1–120)              |
+| monthly_contribution_brl | float | 0       | Aporte mensual en BRL                        |
+| rate_renta_fija          | float | 0.13    | Tasa anual para renta fija (0.13 = 13%)      |
+| rate_accion              | float | 0.12    | Tasa anual para acciones / ETFs              |
+| rate_fii                 | float | 0.10    | Tasa anual para FIIs                         |
+| rate_fundo               | float | 0.11    | Tasa anual para fondos                       |
+| rate_internacional       | float | 0.10    | Tasa anual para activos internacionales (USD)|
+
+--- Lógica del endpoint ---
+
+1. Leer el snapshot inicial del portfolio:
+   - Consultar la última MonthlyPosition para cada instrumento
+     (MAX date GROUP BY instrument_id).
+   - Convertir posiciones en USD a BRL usando el tipo de cambio actual
+     (usar el campo `brl_value` si existe en MonthlyPosition, o bien
+     `market_value_usd * usd_brl_rate`; consultar cómo está guardado en
+     el modelo actual antes de implementar).
+
+2. Agrupar por clase → obtener valor inicial por clase:
+   - `renta_fija`:    instrumentos con tipo `renta_fija`
+   - `accion`:        tipo `accion` y custodian != "XP INTERNATIONAL"
+   - `fii`:           tipo `fii`
+   - `fundo`:         tipo `fundo`
+   - `internacional`: custodian == "XP INTERNATIONAL" (o el identificador
+                      que use el codebase; verificar en CONTEXT.md)
+
+3. Calcular proporciones iniciales de cartera:
+   total_inicial = sum(valores por clase)
+   proporcion[clase] = valor[clase] / total_inicial
+
+4. Proyectar mes a mes (loop i = 1..horizon_months):
+   - tasa_mensual[clase] = (1 + rate[clase])^(1/12) - 1
+   - valor[clase][i] = valor[clase][i-1] * (1 + tasa_mensual[clase])
+                       + monthly_contribution_brl * proporcion[clase]
+   - total[i] = sum(valor[clase][i])
+
+   Nota: las proporciones se mantienen FIJAS (las del snapshot inicial).
+   La re-ponderación dinámica es una complejidad innecesaria para v1.
+
+5. Construir respuesta:
+   ```json
+   {
+     "snapshot_date": "2026-05-31",
+     "initial_total_brl": 850000.0,
+     "data": [
+       {
+         "month": 0,
+         "date": "2026-06",
+         "total": 850000.0,
+         "renta_fija": 510000.0,
+         "accion": 170000.0,
+         "fii": 85000.0,
+         "fundo": 59500.0,
+         "internacional": 25500.0
+       },
+       {
+         "month": 1,
+         "date": "2026-07",
+         ...
+       }
+     ]
+   }
+   ```
+   El mes 0 es el estado actual (sin proyección), útil como ancla del gráfico.
+
+--- Criterios de aceptación T-01 ---
+
+- [ ] Endpoint responde 200 con todos los campos para parámetros válidos
+- [ ] horizon_months fuera de rango [1,120] devuelve 422
+- [ ] month 0 coincide con el valor real del portfolio según MonthlyPosition
+- [ ] Con rate=0 y contribution=0, todos los valores permanecen constantes
+- [ ] Con rate=0.12 y contribution=0, valor del mes 12 ≈ inicial * 1.12
+      (error < 0.1% por redondeo de tasa mensual)
+- [ ] Los aportes se distribuyen proporcionalmente (verificable: si renta_fija
+      es 60% del portfolio, recibe 60% del aporte mensual)
+
+
+═══════════════════════════════════════════════
+T-02 — Hook frontend useSimulation
+═══════════════════════════════════════════════
+
+Crear `frontend/src/hooks/useSimulation.ts`.
+
+```typescript
+interface SimulationParams {
+  horizon_months: number;
+  monthly_contribution_brl: number;
+  rate_renta_fija: number;
+  rate_accion: number;
+  rate_fii: number;
+  rate_fundo: number;
+  rate_internacional: number;
+}
+
+interface SimulationDataPoint {
+  month: number;
+  date: string;
+  total: number;
+  renta_fija: number;
+  accion: number;
+  fii: number;
+  fundo: number;
+  internacional: number;
+}
+
+interface SimulationResult {
+  snapshot_date: string;
+  initial_total_brl: number;
+  data: SimulationDataPoint[];
+}
+```
+
+- Usa `useQuery` de TanStack Query con `queryKey` que incluya todos los params.
+- `enabled: true` siempre (los params tienen defaults).
+- Debounce de 400ms en los inputs numéricos antes de disparar el fetch
+  (usar `useDebounce` o implementar con `useEffect` + `setTimeout`).
+- Stale time: 0 (siempre refetch al cambiar params).
+
+--- Criterios de aceptación T-02 ---
+
+- [ ] Hook exporta `{ data, isLoading, error }`
+- [ ] Cambiar un param dispara refetch tras 400ms (no inmediatamente)
+- [ ] isLoading es true durante el fetch
+
+
+═══════════════════════════════════════════════
+T-03 — Panel de parámetros SimulationControls
+═══════════════════════════════════════════════
+
+Crear `frontend/src/components/SimulationControls.tsx`.
+
+Layout: panel vertical (sidebar izquierdo en desktop, collapsible en mobile).
+
+Secciones:
+
+A) Horizonte temporal
+   - Slider de 12 a 120 meses con marks en 12, 24, 36, 60, 84, 120
+   - Label dinámico: "X años Y meses" (ej. "5 años" si es exacto)
+
+B) Aporte mensual
+   - Input numérico BRL con formato (separadores de miles)
+   - Placeholder: "R$ 0"
+
+C) Tasas de retorno anual (%)
+   - 5 inputs tipo number con step=0.5, min=0, max=50
+   - Labels con color de clase (mismo color que el gráfico):
+     • Renta Fija
+     • Ações / ETFs
+     • FIIs
+     • Fundos
+     • Internacional
+   - Mostrar valor como porcentaje (input 13 → envía 0.13 al hook)
+
+D) Botón "Restaurar defaults" que vuelve a los valores conservadores.
+
+--- Criterios de aceptación T-03 ---
+
+- [ ] Todos los inputs se inicializan con los defaults conservadores
+- [ ] Slider muestra label en años/meses correctamente
+- [ ] "Restaurar defaults" resetea todos los valores
+- [ ] Los 5 colores de clase en labels coinciden exactamente con los del gráfico
+
+
+═══════════════════════════════════════════════
+T-04 — Gráfico de proyección SimulationChart
+═══════════════════════════════════════════════
+
+Crear `frontend/src/components/SimulationChart.tsx`.
+
+Usar `AreaChart` de Recharts con datos del hook.
+
+Configuración:
+- stackOffset="none" (áreas apiladas)
+- 5 `<Area>` apiladas (orden de abajo hacia arriba):
+  renta_fija → accion → fii → fundo → internacional
+- Colores: reutilizar la paleta de colores de tipo que ya exista en el proyecto
+  (verificar en `src/constants` o `src/utils`; si no existe, crear constante
+  `CLASS_COLORS` en el mismo componente)
+- `<Line>` adicional sobre las áreas para el `total` (color blanco/gris, dashed,
+  strokeWidth=2) — muestra el total de forma destacada
+- Eje X: label de fecha (ej. "Jun 26", "Jun 27") cada 12 meses
+- Eje Y: formato BRL abreviado (ej. "R$ 1.2M", "R$ 850k")
+- `<Tooltip>` custom que muestre fecha + cada clase + total al hover
+- `<Legend>` debajo del gráfico
+
+Estado de carga: mostrar `<Skeleton>` mientras isLoading.
+Estado de error: mostrar mensaje de error con botón de retry.
+
+--- Criterios de aceptación T-04 ---
+
+- [ ] Área mes 0 coincide visualmente con el snapshot inicial
+- [ ] Cambiar tasas actualiza el gráfico (debounce)
+- [ ] Tooltip muestra los 5 valores de clase + total formateados en BRL
+- [ ] Eje Y usa abreviaciones correctas (k para miles, M para millones)
+- [ ] Gráfico es responsive (funciona en viewport 1280px y 1440px)
+
+
+═══════════════════════════════════════════════
+T-05 — Métricas resumen SimulationSummary
+═══════════════════════════════════════════════
+
+Crear `frontend/src/components/SimulationSummary.tsx`.
+
+Mostrar 4 cards / stat boxes encima del gráfico:
+
+| Métrica               | Cálculo                                              |
+|-----------------------|------------------------------------------------------|
+| Valor final           | data[horizon_months].total                          |
+| Total aportado        | monthly_contribution_brl * horizon_months           |
+| Ganancia estimada     | valor_final - initial_total_brl - total_aportado    |
+| CAGR implícito        | (valor_final / initial_total_brl)^(12/horizon_months) - 1 |
+
+Formato de valores: BRL con separadores, colores verde/rojo para ganancia.
+CAGR mostrado como porcentaje con 1 decimal.
+
+--- Criterios de aceptación T-05 ---
+
+- [ ] 4 métricas visibles y correctas para los datos del endpoint
+- [ ] Ganancia en verde si positiva, rojo si negativa (edge case: tasa 0 con aportes)
+- [ ] CAGR es matemáticamente correcto (verificable manualmente)
+
+
+═══════════════════════════════════════════════
+T-06 — Página /simulacion y routing
+═══════════════════════════════════════════════
+
+Crear `frontend/src/pages/SimulationPage.tsx`.
+
+Layout:
+```
+┌─────────────────────────────────────────────────────┐
+│  Simulación de Cartera                              │
+│  Snapshot: [fecha del último MonthlyPosition]       │
+├──────────────────────┬──────────────────────────────┤
+│                      │  [SimulationSummary - 4 cards]│
+│  SimulationControls  ├──────────────────────────────┤
+│  (panel izquierdo)   │  [SimulationChart]            │
+│                      │                              │
+│  w: 280px            │  flex-1                      │
+└──────────────────────┴──────────────────────────────┘
+```
+
+En mobile (< 768px): controles arriba, gráfico abajo (flex-col).
+
+Agregar la ruta en el router de la app:
+```tsx
+{ path: "/simulacion", element: <SimulationPage /> }
+```
+
+Agregar entrada en el Sidebar con ícono TrendingUp (lucide-react):
+```
+📈 Simulación
+```
+Posicionarlo cerca de "Crecimiento" o "Position History" en el menú.
+
+--- Criterios de aceptación T-06 ---
+
+- [ ] /simulacion carga sin errores con el portfolio real
+- [ ] Aparece en el sidebar navegando correctamente
+- [ ] Layout de dos columnas en desktop, una columna en mobile
+- [ ] El título muestra la fecha del snapshot correctamente
+
+
+═══════════════════════════════════════════════
+T-07 — Tests y smoke check
+═══════════════════════════════════════════════
+
+Verificaciones manuales antes de merge:
+
+A) Backend:
+   - `curl "http://localhost:8000/api/simulation?horizon_months=12&rate_renta_fija=0.13"`
+     responde 200 con 13 puntos (mes 0..12)
+   - `curl "http://localhost:8000/api/simulation?horizon_months=0"` responde 422
+
+B) Frontend:
+   - Cargar /simulacion con servidor real
+   - Cambiar horizonte de 60 a 120 meses → gráfico se extiende
+   - Cambiar tasa de renta fija a 0% → área de renta fija se aplana
+   - Poner aporte mensual R$ 10.000 → valor final crece vs R$ 0
+   - Verificar métricas de CAGR con calculadora externa
+
+--- Criterios de aceptación T-07 ---
+
+- [ ] Todos los smoke checks pasan
+- [ ] No hay errores en la consola del browser
+- [ ] No hay errores en los logs del backend
+
+
+═══════════════════════════════════════════════
+PASO FINAL
+═══════════════════════════════════════════════
+
+F-1. Mover spec: `specs/pending/simulacion-portfolio.txt`
+              → `specs/done/simulacion-portfolio.txt`
+
+F-2. Actualizar `CONTEXT.md`:
+     - Agregar en "Páginas": `/simulacion` — Proyección determinística a futuro
+     - Agregar en "Endpoints": `GET /api/simulation` con descripción de params
+
+F-3. Actualizar `PLAN.md`:
+     - Marcar "Simulación de Cartera" como completado
+
+F-4. Commit convencional:
+     `feat(simulation): add portfolio future projection page`
+
+
+═══════════════════════════════════════════════
+NOTAS DE IMPLEMENTACIÓN
+═══════════════════════════════════════════════
+
+• Verificar en CONTEXT.md / código actual cómo se identifica el custodian
+  "XP INTERNATIONAL" para separar la clase `internacional` (puede ser
+  "XP INTERNATIONAL", "XP International", u otro string).
+
+• Verificar si MonthlyPosition tiene campo `brl_value` o si hay que convertir
+  desde `market_value_usd`. No asumir — leer el modelo antes de implementar.
+
+• La constante de colores por clase debería ser compartida entre SimulationChart
+  y el resto de la app. Si ya existe una paleta por tipo de instrumento, reutilizarla.
+  Si no, crearla en `src/constants/colors.ts` para uso futuro.
+
+• Para el formato BRL abreviado en el eje Y de Recharts, usar un formatter custom:
+  ```ts
+  const formatBRL = (value: number) => {
+    if (value >= 1_000_000) return `R$ ${(value/1_000_000).toFixed(1)}M`;
+    if (value >= 1_000)     return `R$ ${(value/1_000).toFixed(0)}k`;
+    return `R$ ${value.toFixed(0)}`;
+  };
+  ```

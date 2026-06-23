@@ -11,6 +11,7 @@ from app.routers import import_proventos
 from app.routers import equity_trades
 from app.routers import import_international
 from app.routers import ticker
+from app.routers import simulation
 
 app = FastAPI(
     title="InvestmentTracker API",
@@ -69,6 +70,7 @@ app.include_router(import_proventos.router)
 app.include_router(equity_trades.router)
 app.include_router(import_international.router)
 app.include_router(ticker.router)
+app.include_router(simulation.router)
 
 
 @app.get("/api/health")
