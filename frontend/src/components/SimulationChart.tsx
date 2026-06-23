@@ -1,5 +1,5 @@
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
+  Area, XAxis, YAxis, CartesianGrid, Tooltip,
   Legend, ResponsiveContainer, Line, ComposedChart,
 } from 'recharts';
 import { INSTRUMENT_TYPE_COLORS } from '../utils/formatters';
@@ -20,14 +20,17 @@ function formatDate(dateStr: string): string {
   return `${monthNames[parseInt(month) - 1]} ${year.slice(2)}`;
 }
 
-function CustomTooltip({ active, payload, label }: any) {
+interface TooltipEntry { dataKey: string; value: number; fill: string }
+interface TooltipProps { active?: boolean; payload?: TooltipEntry[]; label?: string }
+
+function CustomTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
-  const total = payload.find((p: any) => p.dataKey === 'total');
-  const classes = payload.filter((p: any) => p.dataKey !== 'total');
+  const total = payload.find((p) => p.dataKey === 'total');
+  const classes = payload.filter((p) => p.dataKey !== 'total');
   return (
     <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-3 shadow-lg text-xs space-y-1">
-      <p className="font-semibold text-slate-700 dark:text-slate-200 mb-2">{formatDate(label)}</p>
-      {classes.map((p: any) => (
+      <p className="font-semibold text-slate-700 dark:text-slate-200 mb-2">{formatDate(label ?? '')}</p>
+      {classes.map((p) => (
         <div key={p.dataKey} className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: p.fill }} />

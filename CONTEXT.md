@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 25 May 2026 (actualizado: Export CSV en Histórico de Posiciones).
+> Refleja el estado REAL del código al 23 Jun 2026 (actualizado: Simulación de Cartera).
 
 ---
 
@@ -526,6 +526,11 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/quotes` | Precios y variación del día de instrumentos accion/fii activos vía yfinance. Cache en memoria TTL 5 min. Tickers B3 con sufijo ".SA". Responde siempre HTTP 200. |
 
+### `/api/simulation`
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/simulation` | Proyección determinística del portfolio. Query params: `horizon_months` (int 1-120, default 60), `monthly_contribution_brl` (float, default 0), `rate_renta_fija/accion/fii/fundo/internacional` (float anual, defaults 0.13/0.12/0.10/0.11/0.10). Clasifica por tipo e custodian (XP_INTERNATIONAL/XP_INTERNACIONAL → internacional). Proporciones fijas desde snapshot inicial. Response: `{snapshot_date, initial_total_brl, data: [{month, date, total, renta_fija, accion, fii, fundo, internacional}]}` |
+
 ### Otros
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -616,6 +621,13 @@ Al seleccionar instrumento en filtro: muestra EquityTradeSummaryCard (qty actual
 precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalculados.
 **API:** `/api/equity-trades/*`
 **Link desde Positions:** botón "Ver operaciones" en filas de tipo accion/fii.
+
+### Simulación (`/simulacion`)
+Proyección determinística del portfolio a futuro. Layout dos columnas (md+): panel de controles fijo 288px izquierda, summary + chart derecha. Mobile: columna única.
+**Controles:** slider horizonte 12-120 meses con botones quick-select (1a/3a/5a/10a), aporte mensual en R$, 5 sliders de tasa anual por clase (renta_fija 13%, accion 12%, fii 10%, fundo 11%, internacional 10%) con dot de color. Botón "Restaurar defaults". Debounce 400ms.
+**Gráfico:** `ComposedChart` de Recharts con 5 `Area` apiladas + `Line` discontinua para total. Tooltip muestra todas las clases + total. Eje X cada 12 meses, eje Y abreviado (R$ 1.2M / R$ 850k).
+**KPI Cards:** Valor final, Total aportado, Ganancia estimada (verde/rojo), CAGR implícito. Skeleton mientras carga.
+**API:** `GET /api/simulation`
 
 ---
 

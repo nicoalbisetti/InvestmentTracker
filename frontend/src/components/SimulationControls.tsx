@@ -1,5 +1,5 @@
 import { INSTRUMENT_TYPE_COLORS } from '../utils/formatters';
-import { SimulationParams, DEFAULT_PARAMS, CLASS_LABELS } from '../api/simulation';
+import { SimulationParams, CLASS_LABELS } from '../api/simulation';
 
 const RATE_CLASSES = ['renta_fija', 'accion', 'fii', 'fundo', 'internacional'] as const;
 
