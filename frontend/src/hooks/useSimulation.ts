@@ -9,7 +9,7 @@ import {
 export function useSimulation() {
   const [params, setParams] = useState<SimulationParams>(DEFAULT_PARAMS);
   const [data, setData] = useState<SimulationResult | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
