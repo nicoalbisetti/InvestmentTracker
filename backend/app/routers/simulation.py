@@ -9,15 +9,17 @@ from app.models.instrument import Instrument
 
 router = APIRouter(prefix="/api/simulation", tags=["simulation"])
 
+# Both spellings exist in imported data from different sources
 INTERNATIONAL_CUSTODIANS = {"XP_INTERNATIONAL", "XP_INTERNACIONAL"}
 
 
 def _classify(instrument: Instrument) -> str | None:
+    # internacional takes priority — must be checked before type-based classification
     if instrument.custodian in INTERNATIONAL_CUSTODIANS:
         return "internacional"
     if instrument.type == "renta_fija":
         return "renta_fija"
-    if instrument.type == "accion" and instrument.custodian not in INTERNATIONAL_CUSTODIANS:
+    if instrument.type == "accion":
         return "accion"
     if instrument.type in ("fii", "fundo"):
         return instrument.type
