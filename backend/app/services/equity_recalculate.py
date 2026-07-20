@@ -33,6 +33,27 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
     instrument = db.query(Instrument).filter(Instrument.id == instrument_id).first()
     is_usd = instrument.currency == "USD" if instrument else False
 
+    # 1b. Asegurar que exista una fila de MonthlyPosition para cada mes desde
+    # from_month hasta el mes actual, para que una operación (nueva o vieja)
+    # siempre genere posición sin depender de un rolado manual previo.
+    today_month = date.today().replace(day=1)
+    end_month = max(from_month, today_month)
+    existing_dates = {
+        d for (d,) in db.query(MonthlyPosition.date)
+        .filter(
+            MonthlyPosition.instrument_id == instrument_id,
+            MonthlyPosition.date >= from_month,
+            MonthlyPosition.date <= end_month,
+        )
+        .all()
+    }
+    cursor = from_month
+    while cursor <= end_month:
+        if cursor not in existing_dates:
+            db.add(MonthlyPosition(instrument_id=instrument_id, date=cursor))
+        cursor += relativedelta(months=1)
+    db.flush()
+
     # 2. Obtener todas las MonthlyPosition >= from_month ordenadas ASC
     positions = (
         db.query(MonthlyPosition)
