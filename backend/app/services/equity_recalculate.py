@@ -1,5 +1,5 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 from calendar import monthrange
 from typing import Optional
 
@@ -20,6 +20,29 @@ def _get_monthly_rate(d: date, db: Session) -> Optional[float]:
     month_start = date(d.year, d.month, 1)
     q = db.query(Quote).filter(Quote.date == month_start).first()
     return q.usd_brl if q and q.usd_brl else None
+
+
+def _fetch_month_end_price(instrument: Instrument, month_end: date) -> Optional[float]:
+    """Precio de cierre del instrumento en (o antes de) el último día del mes, vía Yahoo Finance."""
+    if not instrument or not instrument.ticker or not instrument.ticker.strip():
+        return None
+    if instrument.type not in ("accion", "fii"):
+        return None
+
+    ticker_raw = instrument.ticker.strip()
+    is_usd_ticker = instrument.location == "exterior" or instrument.currency == "USD"
+    symbol = ticker_raw if is_usd_ticker else f"{ticker_raw}.SA"
+
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(symbol).history(start=month_end - timedelta(days=7), end=month_end + timedelta(days=1))
+        if hist.empty:
+            return None
+        val = float(hist["Close"].iloc[-1])
+        return val if val > 0 else None
+    except Exception:
+        logger.warning("equity_recalculate: fallo fetch de precio para %s en %s", symbol, month_end)
+        return None
 
 
 def recalculate_equity_positions(instrument_id: int, from_date: date, db: Session) -> int:
@@ -122,11 +145,24 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
         mp.quantity = running_qty
         mp.avg_price = running_avg if running_qty > 0 and running_avg > 0 else None
 
-        # Si hay unit_price, recalcular balance_brl
+        # Si la posición no tiene precio (p. ej. mes recién creado), buscar el
+        # precio de cierre: fin de mes para meses cerrados, precio del día para
+        # el mes en curso (todavía no tiene cierre de fin de mes en Yahoo).
+        if mp.unit_price is None and running_qty != 0:
+            today = date.today()
+            is_current_month = mp.date.year == today.year and mp.date.month == today.month
+            price_target_date = today if is_current_month else end_of_month
+            fetched_price = _fetch_month_end_price(instrument, price_target_date)
+            if fetched_price:
+                mp.unit_price = fetched_price
+
+        # Si hay unit_price, recalcular balance_brl / balance_usd
         if mp.unit_price is not None:
             if is_usd:
                 rate = mp.usd_rate or _get_monthly_rate(mp.date, db)
+                mp.balance_usd = round(running_qty * mp.unit_price, 2)
                 if rate:
+                    mp.usd_rate = rate
                     mp.balance_brl = round(running_qty * mp.unit_price * rate, 2)
             else:
                 mp.balance_brl = round(running_qty * mp.unit_price, 2)

@@ -683,6 +683,7 @@ Proyección determinística del portfolio a futuro. Layout dos columnas (md+): p
 ### `services/equity_recalculate.py`
 - Calcula y persiste `gain` y `gain_pct` en `MonthlyPosition` para acciones/FIIs con Modified Dietz usando trades del mes y balance del mes anterior.
 - `recalculate_equity_positions(instrument_id, from_date, db)` crea la fila de `MonthlyPosition` que falte para **cada mes** entre `from_date` y el mes actual (no solo el primero) antes de recalcular. Así una compra/venta (nueva o con fecha vieja) siempre genera posición hasta el mes en curso, sin depender de rolar los meses manualmente en Positions (`ensure-month`/`copy-previous-month`). Ver sección "Recálculo de posiciones desde operaciones" más abajo.
+- Si una fila queda sin `unit_price` (mes recién creado), busca el precio en Yahoo Finance: cierre de fin de mes para meses cerrados, precio del día para el mes en curso. Con eso calcula `balance_brl`/`balance_usd`, y para instrumentos USD persiste el `usd_rate` usado (de `quotes`, mensual) en la fila.
 
 ### `services/importer.py`
 - Importa el Excel genérico (Inversiones.xlsx) con 6 hojas
@@ -837,7 +838,8 @@ para esa celda (importados + manuales) y crea uno nuevo con `source="MANUAL"`. E
 `equity_recalculate.py::recalculate_equity_positions(instrument_id, from_date, db)`:
 - Antes de recalcular, crea la fila de `monthly_positions` que falte para **cada mes** entre `from_date.month` y el mes actual (no solo el primero) — a diferencia de `transactions.py::_recompute_positions`, que solo garantiza la fila del propio mes de la transacción y deja los meses posteriores sin crear si no existían.
 - Se dispara desde `equity_trades.py::create_trade` y `update_trade` (compra/venta). Antes de este fix, si un instrumento no tenía ninguna `MonthlyPosition` previa (p. ej. instrumento nuevo sin balance inicial), la primera operación no generaba ninguna posición: la función solo actualizaba filas existentes y devolvía `recalculated_months: 0` sin avisar.
-- `balance_brl`/`balance_usd` de las filas nuevas quedan en `None` hasta que se cargue `unit_price` para ese mes (vía yfinance o manual).
+- Si la fila nueva (o cualquiera sin `unit_price`) tiene `quantity != 0`, busca el precio en Yahoo Finance: cierre de fin de mes para meses cerrados, precio del día para el mes en curso (todavía no tiene cierre de fin de mes). Con ese precio calcula `balance_brl` (y `balance_usd` para instrumentos USD), y persiste el `usd_rate` mensual usado (de `quotes`) en la fila — antes se usaba solo para el cálculo y no quedaba trazable.
+- Si Yahoo Finance no tiene dato para ese ticker/fecha (delisted, feriado sin fallback, etc.), `unit_price`/`balance_brl`/`balance_usd` quedan en `None` sin romper el resto del recálculo — el botón manual "actualizar precios" de Positions sigue siendo el fallback.
 
 ### Cross-custodio en Fixed Income
 Mismo instrumento en 2 custodios → 2 `MonthlyPosition` con `custodian_override` diferente.
