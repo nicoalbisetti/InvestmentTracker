@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 20 Jul 2026 (actualizado: fix de generación de posiciones en equity trades).
+> Refleja el estado REAL del código al 13 Oct 2026 (actualizado: saldo inicial de instrumentos nuevos se registra como aporte).
 
 ---
 
@@ -468,7 +468,7 @@ InvestmentTracker/
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/?status&type&location&currency&custodian&search&sort&order&page&limit` | Lista paginada |
-| POST | `/` | Crea instrumento manualmente; opcionalmente crea MonthlyPosition con balance_usd calculado |
+| POST | `/` | Crea instrumento manualmente; opcionalmente crea MonthlyPosition con balance_usd calculado y una Transaction `aplicacion` (notes "Saldo inicial") por el saldo inicial, para que Análisis de Patrimonio lo cuente como aporte y no como valorización |
 | GET | `/{id}` | Detalle |
 | PUT | `/{id}` | Actualiza campos |
 | POST | `/{id}/rescate-total` | Crea transacción rescate y cierra instrumento (solo renta_fija activo) |

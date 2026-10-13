@@ -132,6 +132,16 @@ def create_instrument(payload: InstrumentCreate, db: Session = Depends(get_db)):
                 usd_rate=usd_rate,
             )
             db.add(pos)
+            # El saldo inicial es un aporte: sin esta transacción el análisis de patrimonio
+            # lo contaría como valorización y _recompute_positions lo pisaría.
+            db.add(Transaction(
+                instrument_id=inst.id,
+                date=pos_date,
+                type="aplicacion",
+                amount_brl=payload.balance_brl,
+                amount_usd=balance_usd,
+                notes="Saldo inicial",
+            ))
             inst.current_balance_brl = payload.balance_brl
             position_created = True
             db.flush()
