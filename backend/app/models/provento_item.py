@@ -11,6 +11,7 @@ class ProvéntoItem(Base):
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
     date = Column(Date, nullable=False)
     amount_brl = Column(Float, nullable=False)
+    amount_native = Column(Float, nullable=True)       # monto en moneda del instrumento (USD); NULL si BRL
     type = Column(String(50), nullable=False)          # 'dividendo' | 'jcp' | 'amortizacion'
     notes = Column(Text, nullable=True)
 

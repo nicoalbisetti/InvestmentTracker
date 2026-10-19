@@ -10,7 +10,8 @@ class ProventoForecast(Base):
     instrument_id = Column(Integer, ForeignKey("instruments.id"), nullable=False, index=True)
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)  # 1-12
-    amount = Column(Float, nullable=False)
+    amount = Column(Float, nullable=False)  # BRL
+    amount_native = Column(Float, nullable=True)  # monto en moneda del instrumento (USD); NULL si BRL
 
     __table_args__ = (UniqueConstraint("instrument_id", "year", "month", name="uq_forecast_instrument_year_month"),)
 

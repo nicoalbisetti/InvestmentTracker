@@ -124,6 +124,17 @@ def _migrate_equity_trades_usd(eng):
             conn.commit()
 
 
+def _migrate_provento_native_amounts(eng):
+    """Add amount_native column to provento_items and provento_forecast if missing."""
+    from sqlalchemy import text
+    with eng.connect() as conn:
+        for table in ("provento_items", "provento_forecast"):
+            cols = [r[1] for r in conn.execute(text(f"PRAGMA table_info({table})"))]
+            if cols and "amount_native" not in cols:
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN amount_native REAL"))
+        conn.commit()
+
+
 def create_tables():
     # Import all models so Base knows about them
     from app.models import (  # noqa: F401

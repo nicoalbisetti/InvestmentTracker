@@ -11,6 +11,7 @@ from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from datetime import date
 from sqlalchemy import extract
+from app.services.provento_currency import get_month_usd_rate, to_brl
 
 router = APIRouter(prefix="/api/proventos", tags=["proventos"])
 
@@ -315,6 +316,49 @@ def get_proventos_grid(
     )
     forecast_map: dict[tuple, float] = {(r.instrument_id, r.month): r.amount for r in forecast_rows}
 
+    # Montos en moneda nativa para instrumentos USD (los items sin amount_native se
+    # derivan de amount_brl / cotización del mes)
+    usd_ids = [i.id for i in instruments if i.currency == "USD"]
+    paid_native_map: dict[tuple, float] = {}
+    forecast_native_map: dict[tuple, float] = {}
+    if usd_ids:
+        rate_cache: dict[int, Optional[float]] = {}
+
+        def _rate(m: int):
+            if m not in rate_cache:
+                rate_cache[m] = get_month_usd_rate(db, target_year, m)
+            return rate_cache[m]
+
+        usd_items = (
+            db.query(ProvéntoItem)
+            .filter(
+                ProvéntoItem.instrument_id.in_(usd_ids),
+                extract('year', ProvéntoItem.date) == target_year,
+            )
+            .all()
+        )
+        for it in usd_items:
+            native = it.amount_native
+            if native is None and _rate(it.date.month):
+                native = it.amount_brl / _rate(it.date.month)
+            if native is not None:
+                key = (it.instrument_id, it.date.month)
+                paid_native_map[key] = paid_native_map.get(key, 0) + native
+        usd_forecasts = (
+            db.query(ProventoForecast)
+            .filter(
+                ProventoForecast.instrument_id.in_(usd_ids),
+                ProventoForecast.year == target_year,
+            )
+            .all()
+        )
+        for f in usd_forecasts:
+            native = f.amount_native
+            if native is None and _rate(f.month):
+                native = f.amount / _rate(f.month)
+            if native is not None:
+                forecast_native_map[(f.instrument_id, f.month)] = native
+
     items = []
     for inst in instruments:
         months = {m: paid_map.get((inst.id, m)) for m in MONTHS}
@@ -333,8 +377,15 @@ def get_proventos_grid(
             "type": inst.type,
             "location": inst.location,
             "custodian": inst.custodian,
+            "currency": inst.currency or "BRL",
             "months": months,
             "forecast_months": forecast_months,
+            "months_native": {m: round(paid_native_map[(inst.id, m)], 2) for m in MONTHS if (inst.id, m) in paid_native_map},
+            "forecast_months_native": {
+                m: round(forecast_native_map[(inst.id, m)], 2)
+                for m in MONTHS
+                if (inst.id, m) in forecast_native_map and months[m] is None
+            },
             "total": total,
         })
 
@@ -378,13 +429,25 @@ def upsert_provento_grid(
     """
     Replace ALL provento_items for this instrument/month with a single MANUAL record.
     Pass amount=null or 0 to delete everything for that cell.
+    `amount` está en la moneda del instrumento; para USD se convierte a BRL con la
+    cotización del mes y se guarda también el monto nativo.
     """
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Mes inválido")
+    inst = db.query(Instrument).filter_by(id=instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
 
     from datetime import date as date_type
     import calendar
     amount = payload.get("amount")
+
+    amount_brl = amount_native = None
+    if amount is not None and amount != 0:
+        try:
+            amount_brl, amount_native, _ = to_brl(db, amount, inst.currency, year, month)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
     # Delete ALL records for this instrument/month (imported + manual)
     db.query(ProvéntoItem).filter(
@@ -401,9 +464,13 @@ def upsert_provento_grid(
     db.add(ProvéntoItem(
         instrument_id=instrument_id,
         date=date_type(year, month, last_day),
-        amount_brl=float(amount),
+        amount_brl=amount_brl,
+        amount_native=amount_native,
         type="dividendo",
         source="MANUAL",
     ))
     db.commit()
-    return {"instrument_id": instrument_id, "year": year, "month": month, "amount": float(amount)}
+    return {
+        "instrument_id": instrument_id, "year": year, "month": month,
+        "amount": float(amount), "amount_brl": amount_brl, "amount_native": amount_native,
+    }

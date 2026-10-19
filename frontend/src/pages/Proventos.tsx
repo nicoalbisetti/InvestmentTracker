@@ -10,6 +10,9 @@ const MONTH_NAMES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','O
 const MONTHS = [1,2,3,4,5,6,7,8,9,10,11,12];
 const TYPE_OPTIONS = Object.entries(INSTRUMENT_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }));
 
+const fmtUSDCell = (v: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
 function fmtPosDate(d: string | null) {
   if (!d) return null;
   const [year, month] = d.split('-');
@@ -296,7 +299,15 @@ function PaidGrid() {
   const saveCell = async (instId: number, month: number, value: string) => {
     const num = value === '' ? null : parseFloat(value.replace(',', '.'));
     setEditing(null);
-    await client.patch(`/api/proventos/grid/${instId}/${year}/${month}`, { amount: num });
+    const isUsd = gridData?.items.find((r: any) => r.id === instId)?.currency === 'USD';
+    try {
+      await client.patch(`/api/proventos/grid/${instId}/${year}/${month}`, { amount: num });
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'No se pudo guardar el provento');
+      return;
+    }
+    // Instrumentos USD: el monto BRL lo calcula el backend con la cotización del mes
+    if (isUsd) { loadGrid(); return; }
     setGridData((prev: any) => {
       if (!prev) return prev;
       const items = prev.items.map((row: any) => {
@@ -411,6 +422,11 @@ function PaidGrid() {
                   const isEditing = editing?.instId === row.id && editing?.month === m;
                   const paid = row.months[m];
                   const forecast = row.forecast_months?.[m];
+                  const isUsd = row.currency === 'USD';
+                  const paidNative = row.months_native?.[m];
+                  const forecastNative = row.forecast_months_native?.[m];
+                  const fmtCell = (brl: number, native?: number) =>
+                    isUsd && native != null ? fmtUSDCell(native) : fmtBRL(brl);
                   return (
                     <td
                       key={m}
@@ -418,9 +434,9 @@ function PaidGrid() {
                       onClick={() => {
                         if (isEditing) return;
                         const initialValue = paid != null
-                          ? String(paid)
+                          ? String(isUsd && paidNative != null ? paidNative : paid)
                           : forecast != null
-                            ? String(forecast)
+                            ? String(isUsd && forecastNative != null ? forecastNative : forecast)
                             : '';
                         setEditing({ instId: row.id, month: m, value: initialValue });
                       }}
@@ -438,12 +454,18 @@ function PaidGrid() {
                           }}
                         />
                       ) : paid != null ? (
-                        <span className="text-xs font-mono group-hover:underline decoration-dotted text-emerald-600 dark:text-emerald-400">
-                          {fmtBRL(paid)}
+                        <span
+                          className="text-xs font-mono group-hover:underline decoration-dotted text-emerald-600 dark:text-emerald-400"
+                          title={isUsd ? fmtBRL(paid) : undefined}
+                        >
+                          {fmtCell(paid, paidNative)}
                         </span>
                       ) : forecast != null ? (
-                        <span className="text-xs font-mono group-hover:underline decoration-dotted text-amber-500 dark:text-amber-400 italic">
-                          {fmtBRL(forecast)}*
+                        <span
+                          className="text-xs font-mono group-hover:underline decoration-dotted text-amber-500 dark:text-amber-400 italic"
+                          title={isUsd ? fmtBRL(forecast) : undefined}
+                        >
+                          {fmtCell(forecast, forecastNative)}*
                         </span>
                       ) : (
                         <span className="text-xs font-mono text-gray-200 dark:text-gray-700">·</span>
@@ -488,7 +510,15 @@ function ForecastTable() {
   const saveCell = async (instId: number, month: number, value: string) => {
     const num = value === '' ? null : parseFloat(value.replace(',', '.'));
     setEditing(null);
-    await client.patch(`/api/proventos/forecast/${instId}/${year}/${month}`, { amount: num });
+    const isUsd = forecastData?.items.find((r: any) => r.id === instId)?.currency === 'USD';
+    try {
+      await client.patch(`/api/proventos/forecast/${instId}/${year}/${month}`, { amount: num });
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'No se pudo guardar la previsión');
+      return;
+    }
+    // Instrumentos USD: el monto BRL lo calcula el backend con la cotización del mes
+    if (isUsd) { loadForecast(); return; }
     // Update local state directly
     setForecastData((prev: any) => {
       if (!prev) return prev;
@@ -592,11 +622,14 @@ function ForecastTable() {
                 {MONTHS.map(m => {
                   const isEditing = editing?.instId === row.id && editing?.month === m;
                   const val = row.months[m];
+                  const isUsd = row.currency === 'USD';
+                  const nativeVal = row.months_native?.[m];
+                  const editVal = isUsd && nativeVal != null ? nativeVal : val;
                   return (
                     <td
                       key={m}
                       className="px-1 py-1 text-center cursor-pointer group"
-                      onClick={() => !isEditing && setEditing({ instId: row.id, month: m, value: val != null ? String(val) : '' })}
+                      onClick={() => !isEditing && setEditing({ instId: row.id, month: m, value: editVal != null ? String(editVal) : '' })}
                     >
                       {isEditing ? (
                         <input
@@ -611,8 +644,11 @@ function ForecastTable() {
                           }}
                         />
                       ) : (
-                        <span className={`text-xs font-mono group-hover:underline decoration-dotted ${val ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-200 dark:text-gray-700'}`}>
-                          {val ? fmtBRL(val) : '·'}
+                        <span
+                          className={`text-xs font-mono group-hover:underline decoration-dotted ${val ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-200 dark:text-gray-700'}`}
+                          title={isUsd && val ? fmtBRL(val) : undefined}
+                        >
+                          {val ? (isUsd && nativeVal != null ? fmtUSDCell(nativeVal) : fmtBRL(val)) : '·'}
                         </span>
                       )}
                     </td>

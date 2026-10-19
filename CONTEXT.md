@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 19 Oct 2026 (actualizado: precio medio editable a mano en Posiciones; recálculo de avg_price desde operaciones desactivado).
+> Refleja el estado REAL del código al 19 Oct 2026 (actualizado: proventos pagados/previstos se cargan en la moneda del instrumento; precio medio editable a mano en Posiciones; recálculo de avg_price desde operaciones desactivado).
 
 ---
 
@@ -290,6 +290,7 @@ InvestmentTracker/
 | instrument_id | FK → instruments, indexed | NO |
 | date | Date | NO |
 | amount_brl | Float | NO |
+| amount_native | Float | SI — monto en moneda del instrumento (USD); NULL en BRL. `amount_brl` = native × cotización del mes al momento de guardar |
 | type | String(50) | NO — 'dividendo' \| 'jcp' \| 'amortizacion' |
 | notes | Text | SI |
 | quantity | Float | SI |
@@ -313,7 +314,8 @@ InvestmentTracker/
 | instrument_id | FK → instruments, indexed | NO |
 | year | Integer | NO |
 | month | Integer | NO — 1-12 |
-| amount | Float | NO |
+| amount | Float | NO — BRL |
+| amount_native | Float | SI — monto en moneda del instrumento (USD); NULL en BRL |
 
 **UNIQUE:** `(instrument_id, year, month)`
 
@@ -446,14 +448,14 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/?page&limit&status` | Tabla anual por instrumento (año actual = provento_items + forecast) |
 | GET | `/monthly?year` | Serie mensual: {month, amount(pagado), forecast(no pagado)} |
-| GET | `/grid?year&type` | Grilla editable mensual; incluye `forecast_months` (previstos donde no hay pago) y `paid_month_totals` para coloración diferenciada de totales |
-| PATCH | `/grid/{instrument_id}/{year}/{month}` | Reemplaza TODOS los registros de la celda con uno MANUAL |
+| GET | `/grid?year&type` | Grilla editable mensual; incluye `currency`, `months_native`/`forecast_months_native` (USD), `forecast_months` (previstos donde no hay pago) y `paid_month_totals` para coloración diferenciada de totales |
+| PATCH | `/grid/{instrument_id}/{year}/{month}` | Reemplaza TODOS los registros de la celda con uno MANUAL. `amount` va en la moneda del instrumento; si es USD se convierte a BRL con la cotización del mes (`services/provento_currency.py`: Quote del mes → snapshot → última Quote) y guarda `amount_native`. 422 si no hay cotización. |
 
 ### `/api/proventos/forecast`
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/?year&type` | Grilla de previsión; orden: brasil→exterior→tipo→nombre |
-| PATCH | `/{instrument_id}/{year}/{month}` | Upsert forecast para una celda |
+| PATCH | `/{instrument_id}/{year}/{month}` | Upsert forecast para una celda. `amount` en moneda del instrumento (misma conversión USD→BRL que la grilla pagada). |
 | POST | `/import/preview` | Preview importación Excel de forecast |
 | POST | `/import/confirm` | Confirma importación de forecast |
 
@@ -580,6 +582,7 @@ Tres tabs:
 - **Histórico:** tabla anual por instrumento. Año actual = provento_items + forecast (misma lógica que gráfico).
 - **Mensual:** gráfico de barras apiladas (Pagado + Previsto por mes). Cards: total pagado, proyección anual, variación vs año anterior.
 - **Grilla pagado:** editable por celda, orden brasil→exterior→tipo→nombre. Celdas con forecast pero sin pago se muestran en ámbar (*) y se incluyen en los totales. Al editar, el valor previsto se pre-popula en el input. El backend devuelve `forecast_months` y `paid_month_totals` por instrumento.
+- **Moneda del instrumento:** en ambas grillas, las filas de instrumentos USD muestran y se editan en USD (tooltip con el equivalente BRL); totales de fila/columna siempre en BRL. El BRL se calcula con la cotización USD/BRL del mes al guardar (si cambia la cotización después, hay que re-guardar la celda). Los items sin `amount_native` (importados) se muestran como BRL ÷ cotización del mes.
 - **Previsión:** grilla de forecast editable, mismo orden.
 **API:** `/api/proventos`, `/api/proventos/monthly`, `/api/proventos/grid`, `/api/proventos/forecast`
 
@@ -777,6 +780,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
 - [x] Distribución con porcentajes y gráfico por localización: DonutChart muestra % en tooltip y leyenda; backend agrega by_location; Dashboard agrega tercer donut "Por Localización" (esmeralda=brasil, índigo=exterior)
 - [x] Edición inline de unit_price en Posiciones: celda P. Unit. clickeable para accion/fii; PATCH /api/positions/{mp_id}/unit-price recalcula balances en cascada con fallback usd_rate; sincroniza PortfolioSnapshot del mes afectado
+- [x] Proventos en moneda del instrumento: grillas Pagado y Previsión cargan/muestran USD para instrumentos USD; backend guarda `amount_native` + BRL convertido con cotización del mes; migración automática `_migrate_provento_native_amounts`
 - [x] Edición inline de avg_price (precio medio) en Posiciones para accion/fii; `recalculate_equity_positions` ya NO pisa avg_price (flag `RECALCULATE_AVG_PRICE = False` en equity_recalculate.py), solo recalcula quantity/balances. El precio medio de operaciones (summary) sigue calculándose desde las MonthlyPosition.
 - [x] Operaciones USD: precio en USD, cotización mensual auto-detectada desde tabla quotes (con override manual), amount_brl = qty × price_usd × rate, avg_price en USD, display dual USD/BRL en formulario y card resumen
 
