@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 13 Oct 2026 (actualizado: saldo inicial de instrumentos nuevos se registra como aporte).
+> Refleja el estado REAL del código al 19 Oct 2026 (actualizado: precio medio editable a mano en Posiciones; recálculo de avg_price desde operaciones desactivado).
 
 ---
 
@@ -417,6 +417,7 @@ InvestmentTracker/
 | GET | `/?sort=default&order=asc&...` | Lista paginada; sort=default → brasil→exterior→tipo→nombre |
 | GET | `/export` | CSV stream con posiciones |
 | PATCH | `/{mp_id}/unit-price` | Actualiza unit_price y recalcula balances en cascada (accion/fii). BRL: balance_brl = qty × price, balance_usd = balance_brl / usd_rate. USD: balance_usd = qty × price, balance_brl = balance_usd × usd_rate. Usa mp.usd_rate con fallback al PortfolioSnapshot del mes. Llama sync_snapshot_for_date. |
+| PATCH | `/{mp_id}/avg-price` | Actualiza avg_price (precio medio) de la posición mensual. Body `{avg_price}` > 0, 422 si inválido, 404 si no existe. No toca balances ni snapshot. |
 | PATCH | `/{mp_id}/balance` | Actualiza balance_brl, balance_usd o quantity |
 | GET | `/last-fixed-income-date` | Último mes importado (renta_fija) |
 | GET | `/count-without-price` | Count de renta_fija activos sin balance |
@@ -551,7 +552,7 @@ distribución por tipo/custodio/localización (tres donuts con porcentaje en too
 ### Positions (`/positions`)
 Tabla de posiciones filtrable/paginable/sortable. Sort default: brasil→exterior→tipo→nombre.
 Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL, copiar mes ant.
-Edición inline: celdas de Saldo BRL, Saldo USD y Cantidad son clickeables para todos los tipos. La celda "Precio actual" (P. Unit.) es clickeable y editable solo para instrumentos tipo accion/fii — muestra subrayado punteado al hover; instrumentos sin precio muestran "Sin precio" en gris itálico.
+Edición inline: celdas de Saldo BRL, Saldo USD y Cantidad son clickeables para todos los tipos. La celda "Precio actual" (P. Unit.) es clickeable y editable solo para instrumentos tipo accion/fii — muestra subrayado punteado al hover; instrumentos sin precio muestran "Sin precio" en gris itálico. La celda "Precio medio" también es clickeable/editable para accion/fii (PATCH `/avg-price`).
 **API:** `/api/positions`, `/api/positions/export`, `/api/positions/copy-previous-month`, etc.
 
 ### History (`/history`)
@@ -776,6 +777,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
 - [x] Distribución con porcentajes y gráfico por localización: DonutChart muestra % en tooltip y leyenda; backend agrega by_location; Dashboard agrega tercer donut "Por Localización" (esmeralda=brasil, índigo=exterior)
 - [x] Edición inline de unit_price en Posiciones: celda P. Unit. clickeable para accion/fii; PATCH /api/positions/{mp_id}/unit-price recalcula balances en cascada con fallback usd_rate; sincroniza PortfolioSnapshot del mes afectado
+- [x] Edición inline de avg_price (precio medio) en Posiciones para accion/fii; `recalculate_equity_positions` ya NO pisa avg_price (flag `RECALCULATE_AVG_PRICE = False` en equity_recalculate.py), solo recalcula quantity/balances. El precio medio de operaciones (summary) sigue calculándose desde las MonthlyPosition.
 - [x] Operaciones USD: precio en USD, cotización mensual auto-detectada desde tabla quotes (con override manual), amount_brl = qty × price_usd × rate, avg_price en USD, display dual USD/BRL en formulario y card resumen
 
 ---

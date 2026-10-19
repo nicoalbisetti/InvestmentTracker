@@ -48,7 +48,7 @@ export default function Positions() {
   const currentMonth = new Date().toISOString().slice(0, 7);
   const [priceMonth, setPriceMonth] = useState(currentMonth);
   const isHistorical = priceMonth !== currentMonth;
-  const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity' | 'unit_price'; value: string } | null>(null);
+  const [editing, setEditing] = useState<{ mpId: number; instrumentId: number; field: 'balance_brl' | 'balance_usd' | 'quantity' | 'unit_price' | 'avg_price'; value: string } | null>(null);
   const [showReturns, setShowReturns] = useState(false);
   const [custodianOptions, setCustodianOptions] = useState<string[]>([]);
   const [rescateTarget, setRescateTarget] = useState<{
@@ -99,6 +99,15 @@ export default function Positions() {
     const num = parseFloat(value.replace(',', '.'));
     if (isNaN(num) || num <= 0) { setEditing(null); return; }
     await client.patch(`/api/positions/${mpId}/unit-price`, { unit_price: num });
+    setEditing(null);
+    const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
+    load({ ...filters, search: search || undefined, month });
+  };
+
+  const saveAvgPrice = async (mpId: number, value: string) => {
+    const num = parseFloat(value.replace(',', '.'));
+    if (isNaN(num) || num <= 0) { setEditing(null); return; }
+    await client.patch(`/api/positions/${mpId}/avg-price`, { avg_price: num });
     setEditing(null);
     const month = (priceMonth !== currentMonth || filters.status === 'cerrado') ? priceMonth : undefined;
     load({ ...filters, search: search || undefined, month });
@@ -604,8 +613,32 @@ export default function Positions() {
                             </span>
                           )}
                         </td>
-                        <td className="px-3 py-2.5 font-mono text-sm text-gray-500">
-                          {row.avg_price != null ? row.avg_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                        <td
+                          className={`px-3 py-2.5 font-mono text-sm text-gray-500 ${(row.type === 'accion' || row.type === 'fii') ? 'cursor-pointer group' : ''}`}
+                          onClick={async () => {
+                            if (row.type !== 'accion' && row.type !== 'fii') return;
+                            let mpId = row.mp_id;
+                            if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
+                            setEditing({ mpId, instrumentId: row.id, field: 'avg_price', value: String(row.avg_price ?? '') });
+                          }}
+                        >
+                          {editing?.instrumentId === row.id && editing.field === 'avg_price' ? (
+                            <input
+                              autoFocus
+                              className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
+                              value={editing.value}
+                              onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
+                              onBlur={() => saveAvgPrice(editing.mpId, editing.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') saveAvgPrice(editing.mpId, editing.value);
+                                if (e.key === 'Escape') setEditing(null);
+                              }}
+                            />
+                          ) : (
+                            <span className={row.type === 'accion' || row.type === 'fii' ? 'group-hover:underline decoration-dotted' : ''}>
+                              {row.avg_price != null ? row.avg_price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—'}
+                            </span>
+                          )}
                         </td>
                         <td className={`px-3 py-2.5 ${nearMaturity ? 'text-amber-500 font-semibold' : 'text-gray-500'}`}>
                           {fmtDate(row.maturity_date)}

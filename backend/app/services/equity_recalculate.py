@@ -14,6 +14,10 @@ from app.services.snapshot_sync import sync_snapshot_for_date
 
 logger = logging.getLogger(__name__)
 
+# Desactivado: el precio medio se edita a mano desde Posiciones
+# (PATCH /api/positions/{mp_id}/avg-price) y no debe pisarse al recalcular.
+RECALCULATE_AVG_PRICE = False
+
 
 def _get_monthly_rate(d: date, db: Session) -> Optional[float]:
     from app.models.quote import Quote
@@ -143,7 +147,8 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
 
         # Actualizar MP
         mp.quantity = running_qty
-        mp.avg_price = running_avg if running_qty > 0 and running_avg > 0 else None
+        if RECALCULATE_AVG_PRICE:
+            mp.avg_price = running_avg if running_qty > 0 and running_avg > 0 else None
 
         # Si la posición no tiene precio (p. ej. mes recién creado), buscar el
         # precio de cierre: fin de mes para meses cerrados, precio del día para
