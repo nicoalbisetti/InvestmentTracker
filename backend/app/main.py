@@ -12,6 +12,7 @@ from app.routers import equity_trades
 from app.routers import import_international
 from app.routers import ticker
 from app.routers import simulation
+from app.expenses.routers import router as expenses_router
 
 app = FastAPI(
     title="InvestmentTracker API",
@@ -56,6 +57,8 @@ def startup():
     _migrate_provento_native_amounts(main_engine)
     _migrate_provento_native_amounts(demo_engine)
     create_tables()
+    from app.expenses.db import create_expense_tables
+    create_expense_tables()
 
 
 app.include_router(dashboard.router)
@@ -74,6 +77,7 @@ app.include_router(equity_trades.router)
 app.include_router(import_international.router)
 app.include_router(ticker.router)
 app.include_router(simulation.router)
+app.include_router(expenses_router)
 
 
 @app.get("/api/health")
