@@ -59,5 +59,14 @@ def review_queue(db: Session) -> dict:
         "unpaired_transfers": unpaired, "unpaired_transfers_counterparty_not_imported": unpaired_info, "pair_suggestions": suggestions,
         "card_payments_without_statement": card_uncovered, "card_payments_inexact": card_inexact,
         "fx_missing": fx_missing, "fx_estimated": fx_estimated,
-        "investments_unlinked": [], "proventos_unlinked": [],  # se completan con la conciliación de inversiones
+        "investments_unlinked": _unlinked(db, ("investment_contribution", "investment_withdrawal"), "investment", by_id),
+        "proventos_unlinked": _unlinked(db, ("provento",), "provento", by_id),
     }
+
+
+def _unlinked(db: Session, kinds, link_type: str, by_id: dict) -> list[dict]:
+    """Movimientos de inversión/provento sin ningún vínculo sugerido ni confirmado."""
+    from app.expenses.models import ExpLink
+    linked = {i for (i,) in db.query(ExpLink.exp_transaction_id).filter(
+        ExpLink.link_type == link_type, ExpLink.status.in_(("suggested", "confirmed")))}
+    return [_item(t) for t in by_id.values() if t.kind in kinds and t.id not in linked]

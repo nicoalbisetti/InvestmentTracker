@@ -2,11 +2,13 @@ import { useSearchParams } from 'react-router-dom';
 import SummaryTab from '../../components/expenses/SummaryTab';
 import MovementsTab from '../../components/expenses/MovementsTab';
 import ImportTab from '../../components/expenses/ImportTab';
+import ReviewTab from '../../components/expenses/ReviewTab';
 import AccountsTab from '../../components/expenses/AccountsTab';
 
 const TABS = [
   { id: 'resumen', label: 'Resumen' },
   { id: 'movimientos', label: 'Movimientos' },
+  { id: 'revisar', label: 'Revisar' },
   { id: 'importar', label: 'Importar' },
   { id: 'config', label: 'Configuración' },
 ];
@@ -29,6 +31,7 @@ export default function GastosPage() {
       </div>
       {tab === 'resumen' && <SummaryTab />}
       {tab === 'movimientos' && <MovementsTab />}
+      {tab === 'revisar' && <ReviewTab />}
       {tab === 'importar' && <ImportTab />}
       {tab === 'config' && <AccountsTab />}
     </div>

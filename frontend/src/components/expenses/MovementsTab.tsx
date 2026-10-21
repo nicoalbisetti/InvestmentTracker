@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   bulkPatch, getAccounts, getCategories, getEntities, getTransactions, patchTransaction, previewRule,
   ExpAccount, ExpCategory, ExpEntity, ExpTx,
@@ -13,7 +14,8 @@ export default function MovementsTab() {
   const [accounts, setAccounts] = useState<ExpAccount[]>([]);
   const [categories, setCategories] = useState<ExpCategory[]>([]);
   const [entities, setEntities] = useState<ExpEntity[]>([]);
-  const [filters, setFilters] = useState(EMPTY);
+  const [params] = useSearchParams();
+  const [filters, setFilters] = useState({ ...EMPTY, needs_review: params.get('pending') === '1' });
   const [page, setPage] = useState(1);
   const [data, setData] = useState<{ total: number; items: ExpTx[] }>({ total: 0, items: [] });
   const [loading, setLoading] = useState(true);

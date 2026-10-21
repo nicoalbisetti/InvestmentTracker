@@ -72,3 +72,33 @@ export function apiErrorDetail(e: unknown): { status?: number; detail?: unknown 
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response;
   return { status: r?.status, detail: r?.data?.detail };
 }
+
+export interface QueueItem { id: number; date: string; description: string; amount: number; currency: string; kind: string }
+export interface PairSuggestion { kind: string; out_id: number; in_id: number; amount: number; days: number; out: QueueItem; in: QueueItem }
+export interface ReviewQueue {
+  unclassified: QueueItem[]; sign_inconsistent: QueueItem[]; unpaired_transfers: QueueItem[];
+  unpaired_transfers_counterparty_not_imported: QueueItem[]; pair_suggestions: PairSuggestion[];
+  card_payments_without_statement: QueueItem[]; card_payments_inexact: QueueItem[];
+  fx_missing: QueueItem[]; fx_estimated: QueueItem[]; investments_unlinked: QueueItem[]; proventos_unlinked: QueueItem[];
+}
+export interface LinkSuggestion {
+  exp_transaction: { id: number; date: string; description: string; amount: number; currency: string; amount_brl: number | null; kind: string };
+  link_type: string; difference_brl: number;
+  links: { id: number; target_type: string; target_id: number; label: string | null; date: string | null; amount: number | null; allocated: number | null; score: number | null }[];
+}
+export interface Audit {
+  bank_movements_without_transaction: { id: number; date: string; description: string; amount: number }[];
+  transactions_without_bank_movement: { id: number; date: string; type: string; amount_brl: number | null; instrument: string | null; custodian: string | null }[];
+  confirmed_link_differences: { exp_transaction_id: number; date: string; bank_amount: number; linked_amount: number; difference: number; max_days_apart: number }[];
+  drifted_links: { link_id: number; exp_transaction_id: number; label: string | null; reason: string }[];
+}
+export const getReviewQueueTyped = (): Promise<ReviewQueue> => client.get(`${B}/review-queue`).then(r => r.data);
+export const rebuildLinks = (): Promise<Record<string, number>> => client.post(`${B}/links/rebuild`).then(r => r.data);
+export const getLinkSuggestions = (status = 'suggested'): Promise<LinkSuggestion[]> =>
+  client.get(`${B}/links/suggestions`, { params: { status } }).then(r => r.data);
+export const confirmLink = (id: number) => client.post(`${B}/links/${id}/confirm`).then(r => r.data);
+export const rejectLink = (id: number) => client.post(`${B}/links/${id}/reject`).then(r => r.data);
+export const confirmPair = (outId: number, inId: number) =>
+  client.post(`${B}/links/pairs`, { out_id: outId, in_id: inId }).then(r => r.data);
+export const getAudit = (from?: string, to?: string): Promise<Audit> =>
+  client.get(`${B}/audit/investments`, { params: { from: from || undefined, to: to || undefined } }).then(r => r.data);

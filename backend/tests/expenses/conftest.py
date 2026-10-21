@@ -61,3 +61,48 @@ def client(engine):
     app.dependency_overrides[expdb.get_exp_db] = override
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def inv_engine():
+    """Base de inversiones en memoria (esquema real) para probar la conciliación."""
+    from app.database import Base
+    from app.models import (  # noqa: F401  (registra todas las tablas y relaciones)
+        instrument, monthly_position, portfolio_snapshot, annual_summary, provento, provento_forecast,
+        provento_item, quote, transaction, import_log, instrument_code_mapping, market_rate, equity_trade)
+    eng = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(bind=eng)
+    return eng
+
+
+@pytest.fixture
+def inv(inv_engine):
+    with sessionmaker(bind=inv_engine)() as session:
+        yield session
+
+
+@pytest.fixture
+def client_inv(engine, inv_engine):
+    """Cliente con ambas bases (gastos e inversiones) reemplazadas por las de prueba."""
+    from app.main import app
+    from app.expenses.services import linking
+    ExpS, InvS = sessionmaker(bind=engine), sessionmaker(bind=inv_engine)
+
+    def exp_override(request=None):
+        s = ExpS()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    def inv_override(request=None):
+        s = InvS()
+        try:
+            yield s
+        finally:
+            s.close()
+
+    app.dependency_overrides[expdb.get_exp_db] = exp_override
+    app.dependency_overrides[linking.get_inv_db] = inv_override
+    yield TestClient(app)
+    app.dependency_overrides.clear()

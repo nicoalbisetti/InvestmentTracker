@@ -40,8 +40,37 @@ class PairBody(BaseModel):
 
 
 @router.post("/links/rebuild")
-def rebuild_links(db: Session = Depends(get_exp_db)):
-    return linking.rebuild(db)
+def rebuild_links(db: Session = Depends(get_exp_db), inv: Session = Depends(linking.get_inv_db)):
+    """Recalcula vínculos internos y sugiere vínculos con inversiones/proventos (nunca confirma estos últimos)."""
+    return {**linking.rebuild(db), **linking.rebuild_investments(db, inv)}
+
+
+@router.get("/links/suggestions")
+def list_link_suggestions(status: str = "suggested", db: Session = Depends(get_exp_db)):
+    if status not in ("suggested", "confirmed", "rejected"):
+        raise HTTPException(422, "status inválido")
+    return linking.suggestions(db, status)
+
+
+@router.post("/links/{link_id}/confirm")
+def confirm_link(link_id: int, db: Session = Depends(get_exp_db)):
+    if linking.set_link_status(db, link_id, "confirmed") is None:
+        raise HTTPException(404, "Vínculo inexistente")
+    return {"ok": True}
+
+
+@router.post("/links/{link_id}/reject")
+def reject_link(link_id: int, db: Session = Depends(get_exp_db)):
+    if linking.set_link_status(db, link_id, "rejected") is None:
+        raise HTTPException(404, "Vínculo inexistente")
+    return {"ok": True}
+
+
+@router.get("/audit/investments")
+def audit_investments(date_from: Optional[date] = Query(None, alias="from"), date_to: Optional[date] = Query(None, alias="to"),
+                      db: Session = Depends(get_exp_db), inv: Session = Depends(linking.get_inv_db)):
+    """Auditoría de sólo lectura sobre inversiones: nunca modifica las tablas de inversiones."""
+    return linking.audit_investments(db, inv, date_from, date_to)
 
 
 @router.post("/links/pairs")
