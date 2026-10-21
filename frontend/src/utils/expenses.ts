@@ -13,7 +13,7 @@ export const KIND_LABELS: Record<string, string> = {
 };
 
 export const PARSER_LABELS: Record<string, string> = {
-  mercadopago_pdf: 'Mercado Pago · cuenta (PDF)', santander_ar_account_pdf: 'Santander AR · cuenta (PDF)', xp_account_csv: 'XP · cuenta (CSV)', xp_card_csv: 'XP · fatura tarjeta (CSV)', inter_account_csv: 'Inter · cuenta (CSV)',
+  mercadopago_pdf: 'Mercado Pago · cuenta (PDF)', santander_ar_account_pdf: 'Santander AR · cuenta (PDF)', santander_ar_card_pdf: 'Santander AR · tarjeta VISA/AMEX (PDF)', xp_account_csv: 'XP · cuenta (CSV)', xp_card_csv: 'XP · fatura tarjeta (CSV)', inter_account_csv: 'Inter · cuenta (CSV)',
 };
 
 const PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#ec4899', '#84cc16',

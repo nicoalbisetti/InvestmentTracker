@@ -38,6 +38,7 @@ class ParsedStatement:
     statement_period: Optional[str] = None
     declared_totals: dict = field(default_factory=dict)
     validation: list[Check] = field(default_factory=list)
+    account_hint: Optional[str] = None   # p. ej. 'VISA' / 'AMEX': ayuda a elegir la cuenta
 
     @property
     def checks_ok(self) -> bool:

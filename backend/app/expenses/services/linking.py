@@ -143,8 +143,18 @@ def payer_card_payments(db: Session) -> list[ExpTransaction]:
 
 def _statement_total(b: ExpImportBatch, currency: str) -> Optional[float]:
     t = (b.statement_totals or {})
-    v = t.get("statement_total") if currency == "BRL" else None
+    v = t.get("statement_total") if currency == "BRL" else t.get(currency)
     return round(v, 2) if v is not None else None
+
+
+BRAND_WORDS = {"visa": "visa", "amex": "amex", "american express": "amex", "mastercard": "mastercard",
+               "master card": "mastercard", "naranja": "naranja", "cabal": "cabal"}
+
+
+def _brands(text: str) -> set[str]:
+    """Marcas de tarjeta mencionadas. Si el pago nombra una marca, sólo puede cubrirlo una fatura de esa marca."""
+    low = text.lower()
+    return {v for k, v in BRAND_WORDS.items() if k in low}
 
 
 def link_statements(db: Session) -> int:
@@ -161,9 +171,12 @@ def link_statements(db: Session) -> int:
     for b in db.query(ExpImportBatch).filter_by(status="confirmed").filter(ExpImportBatch.statement_due_date.isnot(None)):
         batches[b.account_id].append(b)
 
+    accounts = {a.id: a for a in db.query(ExpAccount)}
     n = 0
     for tx in payer_card_payments(db):
-        cands = [b for cid in cards.get(tx.account_id, []) for b in batches.get(cid, [])]
+        brands = _brands(tx.description_raw)
+        cands = [b for cid in cards.get(tx.account_id, []) for b in batches.get(cid, [])
+                 if not brands or brands & _brands(f"{accounts[cid].name} {accounts[cid].institution}")]
         best, best_exact = None, False
         for b in cands:
             diff = (tx.date - b.statement_due_date).days
@@ -188,8 +201,12 @@ def rebuild(db: Session) -> dict:
 
 
 def is_exact_statement_link(db: Session, tx: ExpTransaction) -> bool:
+    """Exacto si el monto iguala el total de la fatura, o si el pago está emparejado con el crédito
+    del mismo importe que aparece en la fatura siguiente (tarjetas AR: débito = pesos + USD x TC)."""
     b = db.get(ExpImportBatch, tx.statement_batch_id) if tx.statement_batch_id else None
-    return bool(b and _statement_total(b, tx.currency) == round(-tx.amount, 2))
+    if b is None:
+        return False
+    return _statement_total(b, tx.currency) == round(-tx.amount, 2) or tx.transfer_group_id is not None
 
 
 def unlink_pair(db: Session, tx: ExpTransaction) -> None:

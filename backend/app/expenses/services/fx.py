@@ -100,6 +100,13 @@ def refresh(db: Session, start: date, end: date, fetch: Optional[Fetcher] = None
     return errors
 
 
+def is_covered(db: Session, pair: str, lo: date, hi: date) -> bool:
+    """¿El cache ya cubre [lo, hi]? Permite no volver a descargar la serie en cada importación."""
+    from sqlalchemy import func
+    mn, mx = db.query(func.min(ExpFxRate.date), func.max(ExpFxRate.date)).filter(ExpFxRate.pair == pair).one()
+    return mn is not None and mn <= lo and mx >= hi - timedelta(days=4)
+
+
 def get_rate(db: Session, pair: str, d: date, fetch: Optional[Fetcher] = None) -> Optional[tuple[float, bool]]:
     """Devuelve (rate, estimated).
 

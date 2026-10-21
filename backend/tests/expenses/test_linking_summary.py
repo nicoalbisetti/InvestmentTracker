@@ -291,3 +291,30 @@ def test_internal_pocket_moves_do_not_clutter_the_queue(db):
     tx(db, a, D(2026, 1, 11), 100, "own_transfer", desc="Dinero retirado Gastos")
     q = review.review_queue(db)
     assert q["unpaired_transfers"] == [] and q["unpaired_transfers_counterparty_not_imported"] == []
+
+
+def test_payment_naming_a_brand_is_not_covered_by_another_brands_statement(db):
+    pay = acct(db, "Banco")
+    visa = acct(db, "Banco VISA", kind="credit_card", paid_from=pay.id)
+    acct(db, "Mastercard AR", kind="credit_card", paid_from=pay.id)  # sin resúmenes
+    batch(db, visa, D(2026, 3, 9), 1000.00)
+    mc = tx(db, pay, D(2026, 3, 9), -26556, "card_payment", desc="Pago de servicios Mastercard: ***0836")
+    vz = tx(db, pay, D(2026, 3, 9), -1000, "card_payment", desc="Pago tarjeta de credito visa Deb. automatico")
+    generic = tx(db, pay, D(2026, 3, 10), -300, "card_payment", desc="Pago de tarjeta de credito")
+    linking.link_statements(db)
+    assert mc.statement_batch_id is None and S.bucket(mc, "bank") == "expense"   # Tarjeta sin detalle
+    assert vz.statement_batch_id is not None and generic.statement_batch_id is not None
+
+
+def test_ar_statement_totals_per_currency_and_pair_makes_link_exact(db):
+    pay = acct(db, "Banco", country="AR", cur="ARS")
+    card = acct(db, "Banco VISA", kind="credit_card", paid_from=pay.id, country="AR", cur="ARS")
+    b = batch(db, card, D(2026, 3, 9), 0)
+    b.statement_totals = {"ARS": 1672047.98, "USD": 3.07}
+    db.commit()
+    p = tx(db, pay, D(2026, 3, 9), -1676453.43, "card_payment", cur="ARS", desc="Pago tarjeta de credito visa")
+    c = tx(db, card, D(2026, 4, 10), 1676453.43, "card_payment", cur="ARS", desc="SU PAGO EN PESOS")
+    c.date = D(2026, 3, 9); db.commit()
+    linking.rebuild(db)
+    assert p.statement_batch_id == b.id and p.transfer_group_id == c.transfer_group_id is not None
+    assert linking.is_exact_statement_link(db, p)  # débito = pesos + USD x TC: se prueba por el par

@@ -3,10 +3,11 @@ from typing import Optional
 from app.expenses.parsers.inter_account_csv import InterAccountCsv
 from app.expenses.parsers.mercadopago_pdf import MercadoPagoPdf
 from app.expenses.parsers.santander_ar_account_pdf import SantanderArAccountPdf
+from app.expenses.parsers.santander_ar_card_pdf import SantanderArCardPdf
 from app.expenses.parsers.xp_account_csv import XpAccountCsv
 from app.expenses.parsers.xp_card_csv import XpCardCsv
 
-PARSERS = [XpAccountCsv(), XpCardCsv(), InterAccountCsv(), MercadoPagoPdf(), SantanderArAccountPdf()]
+PARSERS = [XpAccountCsv(), XpCardCsv(), InterAccountCsv(), MercadoPagoPdf(), SantanderArAccountPdf(), SantanderArCardPdf()]
 
 
 def get_parser(key: str):

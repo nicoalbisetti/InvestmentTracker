@@ -43,23 +43,6 @@ def create_preview(db: Session, data: bytes, filename: str, account_id: Optional
     if parser is None:
         raise ImportError_(422, "Formato no reconocido")
 
-    candidates = suggest_accounts(db, parser.key)
-    if account_id is None:
-        if len(candidates) != 1:
-            raise ImportError_(422, {"message": "Elegí la cuenta", "candidates": [
-                {"id": a.id, "name": a.name} for a in candidates]})
-        account_id = candidates[0].id
-    account = db.get(ExpAccount, account_id)
-    if account is None:
-        raise ImportError_(404, "Cuenta inexistente")
-
-    file_hash = hashlib.sha256(data).hexdigest()
-    prior = db.query(ExpImportBatch).filter_by(account_id=account_id, file_hash=file_hash).first()
-    if prior and prior.status == "confirmed":
-        raise ImportError_(409, "Este archivo ya fue importado para esta cuenta")
-    if prior:  # preview o descartado previo: se reemplaza
-        db.delete(prior); db.flush()
-
     # El parser lee desde disco; el nombre original no se persiste (puede contener nº de cuenta).
     fd, tmp = tempfile.mkstemp(suffix=os.path.splitext(filename)[1])
     try:
@@ -74,13 +57,35 @@ def create_preview(db: Session, data: bytes, filename: str, account_id: Optional
     finally:
         os.unlink(tmp)
 
+    if account_id is None:
+        candidates = suggest_accounts(db, parser.key)
+        if len(candidates) > 1 and stmt.account_hint:  # p. ej. VISA vs AMEX con el mismo formato
+            hint = stmt.account_hint.upper()
+            narrowed = [a for a in candidates if hint in f"{a.name} {a.institution}".upper()]
+            candidates = narrowed or candidates
+        if len(candidates) != 1:
+            raise ImportError_(422, {"message": "Elegí la cuenta", "candidates": [
+                {"id": a.id, "name": a.name} for a in candidates]})
+        account_id = candidates[0].id
+    if db.get(ExpAccount, account_id) is None:
+        raise ImportError_(404, "Cuenta inexistente")
+
+    file_hash = hashlib.sha256(data).hexdigest()
+    prior = db.query(ExpImportBatch).filter_by(account_id=account_id, file_hash=file_hash).first()
+    if prior and prior.status == "confirmed":
+        raise ImportError_(409, "Este archivo ya fue importado para esta cuenta")
+    if prior:  # preview o descartado previo: se reemplaza
+        db.delete(prior); db.flush()
+
     hashes = assign_hashes(account_id, stmt.statement_period, stmt.rows)
     existing = {h for (h,) in db.query(ExpTransaction.dedup_hash).filter(ExpTransaction.dedup_hash.in_(hashes))} if hashes else set()
 
     if stmt.rows:
         lo, hi = min(r.date for r in stmt.rows), max(r.date for r in stmt.rows)
         pairs = [PAIR_USDBRL] + ([PAIR_USDARS] if any(r.currency == "ARS" for r in stmt.rows) else [])
-        fx.refresh(db, lo, hi, fetch, pairs)
+        pairs = [p for p in pairs if not fx.is_covered(db, p, lo, hi)]
+        if pairs:
+            fx.refresh(db, lo, hi, fetch, pairs)
 
     clf = Classifier(db)
     rows = []
