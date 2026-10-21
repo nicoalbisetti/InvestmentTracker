@@ -51,14 +51,14 @@ def test_xp_card_sample():
     assert st.statement_due_date == date(2026, 3, 20) and st.statement_period == "2026-03"
     assert st.checks_ok and len(st.rows) == 8
     easy = [r for r in st.rows if "EASYJET" in r.description_raw]
-    assert len(easy) == 3 and sum(1 for r in easy if r.amount == D("10.00")) == 2  # no se deduplican
+    assert len(easy) == 3 and sum(1 for r in easy if r.amount == D("-10.00")) == 2  # no se deduplican
     inst = next(r for r in st.rows if r.description_raw == "LOJA EXEMPLO")
     assert (inst.installment_number, inst.installment_total, inst.purchase_date) == (3, 6, date(2025, 12, 10))
     assert inst.date == date(2026, 3, 20)
     assert next(r for r in st.rows if r.description_raw == "MERCADO EXEMPLO").installment_total is None  # ' de 1'
     assert next(r for r in st.rows if r.description_raw == "ESTORNO COMERCIO").kind_hint == "refund"
     pay = next(r for r in st.rows if r.kind_hint == "card_payment")
-    assert pay.amount == D("-50.00")
+    assert pay.amount == D("50.00")  # crédito: positivo
     # total sin el pago: 10+10+3.30+100+20+5-7
     assert st.declared_totals["statement_total"] == D("141.30")
     assert st.declared_totals["previous_payment"] == D("-50.00")
@@ -129,4 +129,4 @@ def test_real_golden_values():
         assert st.declared_totals["statement_total"] == D(exp["statement_total"])
         assert st.declared_totals["previous_payment"] == D(exp["previous_payment"])
         for desc, count in exp.get("identical_rows", {}).items():
-            assert sum(1 for r in st.rows if r.description_raw.startswith(desc) and str(r.amount) == "10.00") == count
+            assert sum(1 for r in st.rows if r.description_raw.startswith(desc) and str(r.amount) == "-10.00") == count

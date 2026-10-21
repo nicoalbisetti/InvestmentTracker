@@ -39,16 +39,18 @@ class XpCardCsv:
             if m and int(m.group(2)) > 1:
                 n, total = int(m.group(1)), int(m.group(2))
             hint = None
-            if amount < 0:
+            if amount < 0:  # crédito en la fatura
                 hint = "card_payment" if PAYMENT_RE.match(desc) else "refund"
+            amount = -amount  # convención del módulo: consumo negativo, pago/devolución positivo
             rows.append(ParsedRow(
                 date=due_date, purchase_date=parse_date(r["Data"]), description_raw=desc,
                 amount=amount, currency="BRL", installment_number=n, installment_total=total,
                 kind_hint=hint,
             ))
 
-        total_statement = sum((x.amount for x in rows if x.kind_hint != "card_payment"), Decimal("0"))
-        payments = sum((x.amount for x in rows if x.kind_hint == "card_payment"), Decimal("0"))
+        # Totales en el signo de la fatura (lo que se debe es positivo).
+        total_statement = -sum((x.amount for x in rows if x.kind_hint != "card_payment"), Decimal("0"))
+        payments = -sum((x.amount for x in rows if x.kind_hint == "card_payment"), Decimal("0"))
         checks = [
             Check("rows_found", bool(rows), f"{len(rows)} filas"),
             Check("single_card_payment_type", sum(1 for x in rows if x.kind_hint == "card_payment") <= 1,

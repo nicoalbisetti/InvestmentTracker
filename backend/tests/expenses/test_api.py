@@ -1,25 +1,4 @@
-import pytest
-from fastapi.testclient import TestClient
 
-from app.expenses import db as expdb
-from app.main import app
-
-
-@pytest.fixture
-def client(engine):
-    from sqlalchemy.orm import sessionmaker
-    Session = sessionmaker(bind=engine)
-
-    def override(request=None):
-        s = Session()
-        try:
-            yield s
-        finally:
-            s.close()
-
-    app.dependency_overrides[expdb.get_exp_db] = override
-    yield TestClient(app)
-    app.dependency_overrides.clear()
 
 
 def test_accounts_endpoint_empty(client):

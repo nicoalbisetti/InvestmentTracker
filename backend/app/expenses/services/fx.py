@@ -32,7 +32,8 @@ def _http_get_json(url: str):
     return r.json()
 
 
-def fetch_ptax(start: date, end: date, fetch: Fetcher = _http_get_json) -> dict[date, float]:
+def fetch_ptax(start: date, end: date, fetch: Optional[Fetcher] = None) -> dict[date, float]:
+    fetch = fetch or _http_get_json
     url = PTAX_URL.format(start=start.strftime("%m-%d-%Y"), end=end.strftime("%m-%d-%Y"))
     out: dict[date, float] = {}
     for row in fetch(url)["value"]:
@@ -40,7 +41,8 @@ def fetch_ptax(start: date, end: date, fetch: Fetcher = _http_get_json) -> dict[
     return out
 
 
-def fetch_mep(fetch: Fetcher = _http_get_json) -> dict[date, float]:
+def fetch_mep(fetch: Optional[Fetcher] = None) -> dict[date, float]:
+    fetch = fetch or _http_get_json
     return {
         datetime.strptime(r["fecha"], "%Y-%m-%d").date(): float(r[MEP_FIELD])
         for r in fetch(MEP_URL)
@@ -80,27 +82,32 @@ def _lookup(db: Session, pair: str, d: date) -> Optional[tuple[float, bool]]:
     return row.rate, row.date == d
 
 
-def refresh(db: Session, start: date, end: date, fetch: Fetcher = _http_get_json) -> list[str]:
-    """Descarga y cachea ambas series. Devuelve errores (no levanta: se degrada a cache)."""
+def refresh(db: Session, start: date, end: date, fetch: Optional[Fetcher] = None,
+            pairs=(PAIR_USDBRL, PAIR_USDARS)) -> list[str]:
+    """Descarga y cachea las series pedidas. Devuelve errores (no levanta: se degrada a cache)."""
+    fetch = fetch or _http_get_json
     errors = []
-    try:
-        _store(db, PAIR_USDBRL, "ptax", fetch_ptax(start - timedelta(days=MAX_LOOKBACK_DAYS), end, fetch))
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"ptax: {type(e).__name__}")
-    try:
-        _store(db, PAIR_USDARS, "argentinadatos", fetch_mep(fetch))
-    except Exception as e:  # noqa: BLE001
-        errors.append(f"mep: {type(e).__name__}")
+    if PAIR_USDBRL in pairs:
+        try:
+            _store(db, PAIR_USDBRL, "ptax", fetch_ptax(start - timedelta(days=MAX_LOOKBACK_DAYS), end, fetch))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"ptax: {type(e).__name__}")
+    if PAIR_USDARS in pairs:
+        try:
+            _store(db, PAIR_USDARS, "argentinadatos", fetch_mep(fetch))
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"mep: {type(e).__name__}")
     return errors
 
 
-def get_rate(db: Session, pair: str, d: date, fetch: Fetcher = _http_get_json) -> Optional[tuple[float, bool]]:
+def get_rate(db: Session, pair: str, d: date, fetch: Optional[Fetcher] = None) -> Optional[tuple[float, bool]]:
     """Devuelve (rate, estimated).
 
     Día exacto o forward fill (fin de semana/feriado, hasta MAX_LOOKBACK_DAYS) -> no estimado.
     Si no hay nada en cache se intenta refrescar; si la API falla se usa el último valor
     conocido marcado estimated; None si no existe ninguno.
     """
+    fetch = fetch or _http_get_json
     hit = _lookup(db, pair, d)
     if hit is None or (not hit[1] and d > date.today() - timedelta(days=3)):
         refresh(db, d - timedelta(days=MAX_LOOKBACK_DAYS), d, fetch)
@@ -120,8 +127,9 @@ class Converted:
     estimated: bool
 
 
-def convert(db: Session, amount: float, currency: str, d: date, fetch: Fetcher = _http_get_json) -> Converted:
+def convert(db: Session, amount: float, currency: str, d: date, fetch: Optional[Fetcher] = None) -> Converted:
     """Convierte a BRL y USD. ARS->USD por MEP; USD/ARS->BRL por PTAX."""
+    fetch = fetch or _http_get_json
     est = False
     ptax = get_rate(db, PAIR_USDBRL, d, fetch)
     mep = get_rate(db, PAIR_USDARS, d, fetch) if currency == "ARS" else None
