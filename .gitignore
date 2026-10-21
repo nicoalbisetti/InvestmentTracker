@@ -48,3 +48,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Módulo de gastos (datos personales — nunca commitear)
+docs/expenses/
+backend/app/expenses/seed/*.local.json
+backend/tests/expenses/*golden*.json
+backend/*.expenses*.db
+exports/
