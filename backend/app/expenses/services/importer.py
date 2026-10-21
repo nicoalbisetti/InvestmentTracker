@@ -14,7 +14,7 @@ from app.expenses.models import ExpAccount, ExpImportBatch, ExpLink, ExpTransact
 from app.expenses.models.fx_rate import PAIR_USDARS, PAIR_USDBRL
 from app.expenses.parsers import NeedsDueDate, detect_parser
 from app.expenses.parsers.base import ParseError
-from app.expenses.services import fx
+from app.expenses.services import fx, linking
 from app.expenses.services.classifier import Classifier
 from app.expenses.services.dedup import assign_hashes
 
@@ -180,6 +180,7 @@ def confirm(db: Session, batch_id: int, overrides: Optional[list[dict]] = None, 
     b.rows_new, b.rows_duplicate = inserted, duplicated
     b.preview_rows = None
     db.commit()
+    linking.rebuild(db)
     return batch_detail(b)
 
 
@@ -204,4 +205,5 @@ def delete_batch(db: Session, batch_id: int) -> dict:
         {"statement_batch_id": None}, synchronize_session=False)
     n = db.query(ExpTransaction).filter_by(batch_id=b.id).delete(synchronize_session=False)
     db.delete(b); db.commit()
+    linking.rebuild(db)
     return {"deleted_rows": n}
