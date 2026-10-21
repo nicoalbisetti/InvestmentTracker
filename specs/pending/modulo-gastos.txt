@@ -1,0 +1,611 @@
+FEATURE: Módulo de Gastos (v1) — Importación, clasificación, conciliación y reportes
+===================================================================================
+
+Objetivo: agregar a InvestmentTracker un módulo que importe extractos de cuentas
+y tarjetas de Argentina y Brasil, clasifique cada movimiento (gasto, ingreso,
+transferencia propia, pago de tarjeta, inversión, provento, cambio de moneda),
+lo concilie con otras cuentas y con las inversiones/proventos ya registrados, y
+muestre gastos por categoría, mes y bolsillo.
+
+Fuera de alcance v1 (van en v2, cuando haya datos depurados):
+- Proyecciones de gasto
+- Detección automática de gastos anómalos
+(v1 sí guarda todo lo necesario para ambas: amount_usd, cuotas futuras, categorías.)
+
+
+═══════════════════════════════════════════════
+DECISIONES DE DISEÑO CONFIRMADAS
+═══════════════════════════════════════════════
+
+1. Módulo dentro de InvestmentTracker, con límite estricto:
+   - Backend: paquete propio `backend/app/expenses/` (models, routers, services,
+     parsers). Tablas con prefijo `exp_`. Routers bajo `/api/expenses`.
+   - El módulo SOLO importa de fuera: `app.database` y, únicamente desde
+     `expenses/services/linking.py`, lectura de `Transaction`, `ProventoItem`
+     e `Instrument`. Ningún módulo de inversiones importa nada de `expenses`.
+   - Frontend: `src/pages/expenses/`, `src/components/expenses/`,
+     `src/api/expenses.ts`.
+   - Documentación propia en `CONTEXT-expenses.md` (no inflar CONTEXT.md).
+   - Debe funcionar en ambos entornos (real y demo) vía `get_db` / header X-Env.
+
+2. Moneda consolidada: BRL. Cada movimiento guarda además su moneda nativa y USD.
+   - USD→BRL: PTAX (BCB). ARS→USD: dólar MEP. ARS→BRL = (ARS / MEP) × PTAX.
+
+3. Cuotas: se imputan por cuota pagada (mes de la fatura/resumen en que se cobra),
+   no por compra total. Se guarda n/N para listar cuotas futuras.
+
+4. Comparaciones de Argentina (v2 anomalías) se harán en USD MEP → por eso
+   `amount_usd` es obligatorio desde v1.
+
+5. Tres "bolsillos" (entidades): Personal, Bertioga (departamento en Bertioga),
+   PJ (empresa propia). Configurables (tabla), no hardcodeados.
+
+6. Los flujos de inversión NO son gasto ni ingreso. Los pagos del FGC
+   (liquidaciones extrajudiciales) son rescates de inversión. Los proventos
+   (B3, VALE3, SunnyHub, alquiler de acciones) se vinculan al módulo Proventos.
+
+7. Privacidad: los extractos reales y cualquier identificador (CUIT, CPF, CBU,
+   CVU, nº de cuenta, nombres de terceros) NUNCA se commitean.
+   - Las reglas con nombres reales (<TITULAR>, <EMPRESA_PJ>, etc.) viven SOLO en
+     `rules.local.json`; este documento usa placeholders.
+   - `.gitignore`: agregar `docs/expenses/` y `backend/app/expenses/seed/*.local.json`.
+   - Tests con extractos reales: se saltean (pytest.skip) si el archivo no existe.
+     Además, fixtures sintéticos mínimos commiteados en `backend/tests/expenses/fixtures/`.
+
+Dependencias entre tareas:
+- T-01 antes que todo.
+- T-02 (parsers) y T-06 (tipos de cambio) en paralelo después de T-01.
+- T-03 depende de T-02. T-04 y T-05 dependen de T-03.
+- T-07 depende de T-04/T-05/T-06. T-08 depende de T-07.
+- T-09 (demo) y T-10 (carga inicial real) al final.
+
+
+═══════════════════════════════════════════════
+PASO 0 — Setup
+═══════════════════════════════════════════════
+
+0.1 Seguir los pasos de setup definidos en `.claude/CLAUDE.md` (ClickUp/TASKS.md).
+0.2 Actualizar `.gitignore` (ver decisión 7) ANTES de cualquier otro commit.
+    Verificar con `git status` que nada de `docs/expenses/` queda trackeado.
+0.3 Commit: `feat: add spec for expenses module`.
+
+
+═══════════════════════════════════════════════
+T-01 — Modelo de datos
+═══════════════════════════════════════════════
+
+Crear modelos en `backend/app/expenses/models/` y registrarlos en
+`create_tables()` de `database.py` (agregar el import del paquete).
+Tablas nuevas → `create_all` alcanza; no hace falta migración ad-hoc.
+
+--- exp_entities ---
+id, code (unique: personal | bertioga | pj), name, active
+Seed: Personal, Bertioga, PJ.
+
+--- exp_accounts ---
+id, name, institution, country (AR | BR), kind (bank | wallet | credit_card),
+currency (ARS | BRL | USD; la principal), parser_key (nullable),
+owner_identifiers (JSON: nombres, documentos, CBU/CVU, códigos de banco
+  que identifican cuentas PROPIAS — se cargan desde la UI, no en código),
+paid_from_account_id (nullable; para tarjetas: cuenta que paga la fatura),
+default_entity_id (nullable), has_statements (bool), active, created_at.
+
+--- exp_import_batches ---
+id, account_id, file_name, file_hash (sha256; UNIQUE con account_id),
+parser_key, period_start, period_end, statement_due_date (tarjetas),
+statement_period (YYYY-MM, tarjetas), statement_total_native (nullable),
+validation (JSON: checks y resultado), rows_total, rows_new, rows_duplicate,
+status (preview | confirmed | discarded), created_at, confirmed_at.
+
+--- exp_categories ---
+id, name, parent_id (nullable), is_system (bool), active.
+Seed:
+  Supermercado; Restaurantes y delivery; Transporte (Uber/taxi, combustible,
+  peajes); Auto; Viajes (aéreos, alojamiento, alquiler de auto); Hogar y
+  mantenimiento; Servicios (luz, gas, agua, internet, telefonía); Condominio /
+  expensas; Limpieza; Salud y farmacia; Ropa y calzado; Suscripciones;
+  Educación; Familia; Ocio y entretenimiento; Regalos; Servicios profesionales;
+  Impuestos; Cargos financieros (multas, intereses, IOF rotativo, refinanciación);
+  Cargos bancarios (anualidad, tarifas); Efectivo (extracciones); Rendimientos;
+  Otros.
+  Sistema (is_system=1): "Tarjeta sin detalle", "Sin clasificar".
+
+--- exp_transactions ---
+id, account_id, batch_id,
+date                 (fecha de imputación: movimiento en cuenta / vencimiento
+                      de la fatura para tarjetas)
+purchase_date        (nullable; fecha de compra original en tarjetas)
+statement_period     (nullable; YYYY-MM de la fatura/resumen)
+description_raw, counterparty (nullable; extraído si el formato lo permite),
+merchant_normalized  (ver T-04)
+external_id          (nullable; nº comprobante / ID de operación)
+amount               (con signo; negativo = sale dinero), currency,
+fx_usd_brl, fx_ars_usd (los usados en la conversión), amount_brl, amount_usd,
+kind                 (enum, ver abajo)
+category_id, entity_id (nullable),
+installment_number, installment_total (nullable),
+classification_source (own_account | rule | manual | default), rule_id (nullable),
+needs_review (bool), notes, dedup_hash (UNIQUE), created_at, updated_at.
+
+kind (enum):
+  expense | refund | income | own_transfer | card_payment |
+  investment_contribution | investment_withdrawal | provento |
+  fx_conversion | unknown
+
+Reglas de signo esperadas (validar, marcar needs_review si no cumplen):
+  expense <0 · refund >0 · income >0 · provento >0 ·
+  investment_contribution <0 · investment_withdrawal >0 ·
+  own_transfer, card_payment, fx_conversion: cualquier signo.
+
+--- exp_rules ---
+id, priority (int, menor = primero), account_id (nullable = todas),
+field (description_raw | counterparty | merchant_normalized),
+pattern (regex, case-insensitive), amount_sign (any | positive | negative),
+set_kind, set_category_id (nullable), set_entity_id (nullable),
+set_merchant (nullable), active, hits (int), origin (seed | manual), created_at.
+
+--- exp_links ---
+id, exp_transaction_id,
+target_type (exp_transaction | investment_transaction | provento_item |
+             import_batch),
+target_id, link_type (own_transfer_pair | card_statement | investment | provento),
+amount_allocated_brl (nullable; para vínculos parciales/múltiples),
+status (suggested | confirmed | rejected), score (float), created_at.
+Permite N:M:
+  - 1 TED del FGC → 2 rescates (CDB Will Nov 2027 + Nov 2028).
+  - 1 Pix SunnyHub → 2 proventos (mayo + junio).
+  - 1 provento VALE3 (3.950) ← 1 cobro en Inter (2.458,67) + parte en XP.
+
+--- exp_fx_rates ---
+date, pair (USDBRL_PTAX | USDARS_MEP), rate, source, PK (date, pair).
+
+--- dedup_hash ---
+sha256(account_id | date | purchase_date | amount | currency |
+       normalize(description_raw) | external_id | installment n/N |
+       statement_period | ordinal)
+`ordinal` = índice de ocurrencia de filas idénticas dentro del mismo archivo
+(ej.: 12 cargos "EASYJET MOBILIDADE LTD R$ 10,00" el mismo día son 12
+movimientos distintos y legítimos).
+Reimportar el mismo archivo → bloqueado por file_hash.
+Archivos con períodos superpuestos → las filas repetidas se detectan por
+dedup_hash y se informan como duplicadas en el preview.
+
+--- Criterios de aceptación T-01 ---
+- [ ] Tablas creadas en real y demo al iniciar
+- [ ] Seeds de entidades y categorías idempotentes
+- [ ] Ningún modelo de `expenses` tiene FK a tablas de inversiones
+      (los vínculos van por exp_links con target_type/target_id)
+
+
+═══════════════════════════════════════════════
+T-02 — Parsers
+═══════════════════════════════════════════════
+
+Paquete `backend/app/expenses/parsers/`. Interfaz común:
+
+  class StatementParser(Protocol):
+      key: str
+      def detect(self, filename: str, head_bytes: bytes) -> bool
+      def parse(self, path) -> ParsedStatement
+
+  ParsedStatement:
+      parser_key, period_start, period_end, statement_due_date?,
+      statement_period?, currency(s), rows: list[ParsedRow],
+      declared_totals: dict, validation: list[Check]
+
+  ParsedRow: date, purchase_date?, description_raw, counterparty?,
+      external_id?, amount, currency, installment_number?,
+      installment_total?, balance_after?
+
+Usar `parse_br_number()` existente (moverlo a `app/utils/numbers.py` y
+re-exportar desde `proventos_importer.py` para no romper imports) y crear
+`parse_ar_number()` (mismo formato `.` miles / `,` decimal, pero con
+variantes `$ 103.091 80`, `1672.047,98-` con signo al final, `-$ 26.555,51`).
+
+Parsers a implementar (formatos verificados con extractos reales):
+
+--- 1. xp_account_csv (Brasil, cuenta XP) ---
+- UTF-8 con BOM, separador `;`, encabezado `Data;Hora;Descricao;Valor;Saldo`.
+- Data `dd/mm/yy`. Valor `-R$ 1.234,56` / `R$ 1.234,56`.
+- Orden descendente por fecha → ordenar ascendente.
+- Validación: saldo corrido (saldo_anterior + valor = saldo) en cada fila.
+
+--- 2. xp_card_csv (Brasil, fatura tarjeta XP) ---
+- UTF-8 con BOM, CRLF, `;`, encabezado `Data;Estabelecimento;Portador;Valor;Parcela`.
+- La fecha de vencimiento NO viene dentro del CSV: tomarla del nombre
+  `FaturaYYYY-MM-DD.csv`; si no matchea, pedirla en el import (campo obligatorio).
+- `Data` = fecha de compra original (puede ser de 2025 en cuotas) → purchase_date.
+  date = vencimiento; statement_period = YYYY-MM del vencimiento.
+- Parcela: `n de N` → cuota; `-` o ` de 1` → sin cuota.
+- Portador con variantes (variantes del nombre del titular): ignorar.
+- Líneas negativas:
+    `Pagamentos Validos Normais`, `Pagamento de fatura` → card_payment
+    (es el pago de la fatura ANTERIOR; no es consumo).
+    Cualquier otra negativa (`ESTORNO ...`, `Estorno IOF Exterior`,
+    devoluciones de comercios) → refund.
+  OJO: reconocer el pago por tipo, no por un único texto. Una línea negativa
+  que no matchee ninguna regla → needs_review.
+- statement_total = suma de todas las líneas que NO son card_payment.
+- Validación: total vs pago de la cuenta (se hace en T-05, no acá).
+
+--- 3. inter_account_csv (Brasil, cuenta Inter) ---
+- UTF-8 sin BOM. Preámbulo de 4–5 líneas (`Extrato Conta Corrente`, `Conta ;…`,
+  `Período ;dd/mm/yyyy a dd/mm/yyyy`, `Saldo: ;…`) → leer período; buscar la
+  línea que empieza con `Data Lançamento` como encabezado.
+- Columnas `Data Lançamento;Descrição;Valor;Saldo`, valores sin `R$`.
+- Extraer counterparty de `Cp :<código>-<nombre>` (el código es el banco de la
+  contraparte) y de `00019 <nº> BANCO INTER SA`.
+- Validación: saldo corrido.
+
+--- 4. santander_ar_account_pdf (Argentina, cuenta Santander) ---
+- pdfplumber. Período en `Desde: dd/mm/yy` / `Hasta: dd/mm/yy`.
+- Secciones "Movimientos en pesos" y "Movimientos en dólares" (si hay) →
+  currency ARS / USD respectivamente.
+- Fila: fecha, comprobante (external_id), movimiento, importe (`-$ 26.555,51`),
+  saldo. La línea siguiente sin fecha es detalle (ej. `A <tercero> /
+  varios…`, `Mastercard: …`, `Merpago*open25hs - tarj nro. …`) → concatenar a
+  description_raw y extraer counterparty (`A …` / `De …` hasta el primer `/`).
+- Ignorar `Saldo Inicial`, encabezados repetidos, pies de página.
+- Validación: saldo corrido por sección + saldo final declarado.
+
+--- 5. mercadopago_pdf (Argentina) ---
+- `RESUMEN DE CUENTA EN PESOS`, período `Del 1 al 30 de abril de 2026`.
+- Declarados: Saldo inicial, Entradas, Salidas, Saldo final.
+- Columnas Fecha (`dd-mm-yyyy`), Descripción, ID de la operación (external_id),
+  Valor, Saldo. La descripción se parte en varias líneas ARRIBA y ABAJO de la
+  línea con fecha (ej. "Transferencia recibida Julio" / fecha / "<tercero>
+  Moreno") → reconstruir agrupando por bloque entre filas con fecha, usando
+  coordenadas de pdfplumber (no solo texto plano).
+- Validación: saldo_inicial + entradas + salidas = saldo_final y saldo corrido.
+
+--- 6. santander_ar_card_pdf (Argentina, VISA y AMEX Santander; mismo layout) ---
+- Encabezado: `CIERRE dd Mmm yy VENCIMIENTO dd Mmm yy` → statement_due_date,
+  statement_period. Número de cuenta de la tarjeta para identificarla.
+- Filas de consumo: `[YY Mes] DD comprobante [*|K|E] COMERCIO [C.nn/NN] importe_ARS [importe_USD]`.
+  Año y mes se arrastran de la fila anterior cuando vienen vacíos. Meses en
+  español abreviados (`Enero`, `Febrero`, `Diciem.`, …).
+  Cuota `C.03/06` → installment 3/6. date = vencimiento; purchase_date = fecha.
+  Importe en columna U$S → currency USD (ej. SPOTIFY USD 3,15).
+- `SU PAGO EN PESOS` / `SU PAGO EN USD` (con `-` al final) → card_payment.
+- Impuestos como líneas propias → expense, categoría Impuestos:
+  `IMPUESTO DE SELLOS`, `IIBB PERCEP-…`, `IVA RG 4240 …`, `DB.RG 5617 30% …`.
+- Ignorar: SALDO ANTERIOR, ofertas "Express Plan", tablas de TNA/CFTEA, textos
+  legales, `Total Consumos de …` (usarlo SOLO para validar).
+- Validación: Σ consumos + impuestos ≈ monto de
+  `DEBITAREMOS DE SU C.C. … LA SUMA DE $ X + U$S Y` (tolerancia 1 peso / 0,01 USD).
+  Nota: en el texto extraído, SALDO ACTUAL viene sin valores; usar la línea DEBITAREMOS.
+
+--- Criterios de aceptación T-02 ---
+- [ ] Cada parser tiene test con fixture sintético commiteado
+- [ ] Tests con archivos reales de docs/expenses (skip si no existen):
+      todos los checks de validación en verde para TODOS los archivos actuales
+- [ ] xp_card_csv: Fatura2026-03-20 → statement_total = 14.961,54
+      (incluye los 4 cargos por pago atrasado: Multa 246,41, Encargos 104,60,
+      IOF Rotativo 49,85, Juros 12,32) y 1 card_payment de −12.320,58
+- [ ] xp_card_csv: Fatura2026-04-20 → los 14 cargos EASYJET de R$ 10,00 del
+      24/03 quedan como 14 filas (no se deduplican)
+- [ ] detect() elige el parser correcto para los 7 tipos sin indicarlo a mano
+
+
+═══════════════════════════════════════════════
+T-03 — Flujo de importación (backend)
+═══════════════════════════════════════════════
+
+Endpoints (router `backend/app/expenses/routers/imports.py`):
+
+POST /api/expenses/imports            (multipart: file, account_id?, due_date?)
+  - Detecta parser, parsea, sugiere cuenta (por parser + identificadores).
+  - Calcula dedup, convierte moneda (T-06), clasifica (T-04), sugiere
+    vínculos (T-05). Guarda batch en status=preview + filas en tabla staging
+    (o JSON en el batch).
+  - Responde: batch_id, cuenta sugerida, período, checks de validación,
+    filas con {kind, category, entity, needs_review, duplicate, links sugeridos}.
+  - 409 si file_hash ya fue confirmado para esa cuenta.
+
+POST /api/expenses/imports/{batch_id}/confirm   (body: account_id, overrides[])
+  - Si algún check de validación falla → 422 salvo `force=true`.
+  - Inserta filas no duplicadas, guarda vínculos suggested.
+
+DELETE /api/expenses/imports/{batch_id}
+  - Preview → descarta. Confirmado → borra sus filas y vínculos (con confirmación en UI).
+
+GET /api/expenses/imports  → historial de lotes.
+
+--- Criterios de aceptación T-03 ---
+- [ ] Reimportar el mismo archivo devuelve 409
+- [ ] Importar XP Jan–Jun y luego un export que se superponga → solo filas nuevas
+- [ ] Borrar un lote confirmado elimina exactamente sus filas
+
+
+═══════════════════════════════════════════════
+T-04 — Clasificación
+═══════════════════════════════════════════════
+
+Servicio `expenses/services/classifier.py`. Orden de evaluación por fila:
+
+1. Normalización de comercio (`merchant_normalized`):
+   - Mayúsculas, colapsar espacios, quitar prefijos de procesadores:
+     `MERPAGO*`, `MP*`, `PAYU*AR*`, `DLO*`, `PVS*`, `AMAZONMKTPLC*`, `UBER* `, `ANT*`.
+   - Quitar códigos de sucursal al final (`PAO DE ACUCAR-2071` → `PAO DE ACUCAR`,
+     `RAIA1732` → `RAIA`, `LOJAS RENNER FL 481` → `LOJAS RENNER`).
+   - Clave de matching sin no-alfanuméricos (`APPLE.COM/BILL` = `APPLECOMBILL`).
+2. Transferencia propia por identificadores de la cuenta (owner_identifiers de
+   CUALQUIER exp_account activa) → own_transfer, source=own_account.
+3. Reglas (exp_rules) por priority; la primera que matchea gana.
+4. Default: negativo → expense "Sin clasificar", positivo → income
+   "Sin clasificar"; ambos needs_review=1.
+
+Corrección manual (PATCH de una fila) con opción "crear regla": precarga
+pattern = merchant_normalized escapado, field = merchant_normalized, y aplica
+la regla a las filas existentes con needs_review=1 (preview del impacto antes).
+
+Seed de reglas: en `backend/app/expenses/seed/rules.local.json` (gitignored),
+con `rules.example.json` commiteado (mismas reglas con nombres de ejemplo).
+Reglas iniciales a cargar en el .local.json (las validadas con los extractos):
+
+  Brasil
+  - `conta investimento`                                   → own_transfer
+  - `Pix (enviado|recebido).*<TITULAR>`                    → own_transfer
+  - `00019 \d+ BANCO INTER S\.? ?A`                        → own_transfer
+  - `Pagamento para BANCO XP|PAGAMENTO DE FATURA|Debito Automatico Fatura Cartao Inter`
+                                                           → card_payment
+  - `Pagamentos Validos Normais|^Pagamento de fatura$`     → card_payment (fatura)
+  - `FUNDO GARANTIDOR DE CREDITOS`                         → investment_withdrawal
+  - `Brasil Bitcoin|Mercado Bitcoin|Alpha Trading|Deitres|Debito Online Td|Debito Renda Fixa`
+                                                           → investment_contribution
+  - `LIQ\. CAMBIO`                                         → fx_conversion
+  - `IOF CAMBIO`                                           → expense / Impuestos
+  - `Credito B3|Credito Evento B3|SUNNYHUB`                → provento
+  - `<EMPRESA_PJ>` (positivo)                             → income / PJ
+  - `DARF-SIMPLES`                                         → expense / Impuestos / PJ
+  - `Pagamento efetuado DARF`                              → expense / Impuestos / Personal
+  - `<CONTADOR>`                                         → expense / Servicios profesionales / PJ
+  - `<CONDOMINIO>`                                       → expense / Condominio / Bertioga
+  - `<MUNICIPALIDAD>`                                    → expense / Impuestos / Bertioga
+  - `<ELECTRICIDAD>`                                     → expense / Servicios / Bertioga
+  - `<PERSONAL_LIMPIEZA>`                                → expense / Limpieza / Bertioga
+  - `VIVO SP|Telefonica Brasil`                            → expense / Servicios (entidad A CONFIRMAR → needs_review)
+  - `Encargos de Refinanciamento|Multa Contratual|Juros de Mora|IOF Rotativo`
+                                                           → expense / Cargos financieros
+  - `^ANUIDADE CARTAO` / `^ESTORNO ANUIDADE`               → expense / refund, Cargos bancarios
+  - `IOF Exterior`                                         → expense o refund / Impuestos
+  - `Rendimento automático`                                → income / Rendimientos
+  - `Saque|TARIFA DE SAQUE`                                → expense / Efectivo / Cargos bancarios
+  - `NETFLIX|APPLECOMBILL|AMAZONPRIMEBR|SPOTIFY`           → expense / Suscripciones
+
+  Argentina
+  - `Transferencia (realizada|recibida|inmediata).*<titular>`
+    y MP `Transferencia (enviada|recibida) <TITULAR>` → own_transfer
+  - `SU PAGO EN (PESOS|USD)`                               → card_payment
+  - `Pago de servicios.*Mastercard`                        → card_payment (tarjeta sin extracto)
+  - `IMPUESTO DE SELLOS|IIBB PERCEP|IVA RG 4240|DB\.RG 5617` → expense / Impuestos
+  - MP `^Rendimientos$`                                    → income / Rendimientos
+  - `UBER`                                                 → expense / Transporte
+  - `SHELLBOX|ESTACION DE SERVICIO|AUBASA`                 → expense / Transporte
+  - `PEDIDOSYA`                                            → expense / Restaurantes y delivery
+  - `DISCO|Supermercado|MENOR COSTE`                       → expense / Supermercado
+
+--- Criterios de aceptación T-04 ---
+- [ ] Con los extractos actuales, ≥ 90% de las filas de XP e Inter quedan
+      clasificadas sin needs_review
+- [ ] Crear regla desde corrección manual reclasifica las filas pendientes
+      que matchean (y solo esas)
+- [ ] Las reglas nunca pisan una clasificación manual
+
+
+═══════════════════════════════════════════════
+T-05 — Conciliación y vínculos
+═══════════════════════════════════════════════
+
+Servicio `expenses/services/linking.py`. Se ejecuta al confirmar un import y
+bajo demanda (POST /api/expenses/links/rebuild).
+
+A) Pares de transferencias propias (own_transfer_pair)
+   - Contraparte: otra exp_transaction own_transfer, signo opuesto, mismo
+     monto exacto y misma moneda, |Δfecha| ≤ 2 días, en otra cuenta.
+   - Candidato único y Δ ≤ 1 día → confirmed automático; si no, suggested.
+   - Sin par: si la contraparte es una cuenta sin extractos
+     (has_statements=0) → OK, se informa como "contraparte no importada";
+     si no → cola de revisión.
+
+B) Pago de tarjeta ↔ fatura (card_statement)
+   - card_payment en la cuenta pagadora ↔ import_batch de la tarjeta con
+     statement_total igual (exacto) y |pago − vencimiento| ≤ 5 días.
+   - Tarjeta con has_statements=0 o sin batch para ese período:
+     el card_payment se REPORTA COMO GASTO en categoría sistema
+     "Tarjeta sin detalle" (si no, ese gasto desaparece). Cuando se importe la
+     fatura del período, deja de contarse automáticamente.
+   - El card_payment de DENTRO de la fatura se vincula al de la cuenta.
+
+C) Inversiones (investment)
+   - investment_contribution / investment_withdrawal ↔ Transaction
+     (aplicacion / rescate) de InvestmentTracker.
+   - Candidatos: mismo signo lógico, |Δfecha| ≤ 30 días (Deitres tuvo 22 días
+     de diferencia), monto exacto o hasta 6% de diferencia (FGC paga distinto
+     al último saldo). Para FGC buscar solo instrumentos con in_liquidation=1.
+   - Permite 1 movimiento → N transacciones con amount_allocated_brl.
+   - Siempre suggested (nunca confirmación automática); score por cercanía
+     de monto y fecha.
+
+D) Proventos (provento)
+   - kind=provento ↔ provento_items. Permite 1 cobro → N proventos (SunnyHub
+     mayo+junio en un Pix) y 1 provento ← N cobros en distintas cuentas
+     (VALE3 en XP e Inter suman un único registro). Siempre suggested.
+   - El instrumento puede figurar con otra custodia que la cuenta donde se cobra
+     (SunnyHub: custodia XP, cobra en Inter) → no filtrar por custodia.
+
+E) Auditoría de inversiones (solo lectura)
+   GET /api/expenses/audit/investments?from&to
+   - Movimientos de inversión del extracto sin Transaction vinculada.
+   - Transactions de InvestmentTracker de custodias con cuenta importada en
+     ese período y sin movimiento bancario vinculado.
+   - Diferencias de monto/fecha en vínculos confirmados.
+   (Así se detectaron hoy: FGC sin cargar/montos distintos, Deitres con fecha
+   errónea, Tesouro IPCA+ 2032 sin aplicación.)
+
+--- Criterios de aceptación T-05 (con datos reales, ene–sep 2026) ---
+- [ ] Pix Inter→XP: 20/20 pares confirmados; XP→Inter: 16/16
+- [ ] Faturas XP: las 9 (ene–sep) quedan vinculadas a su pago en la cuenta XP
+      con monto exacto (ej. mar: 14.961,54 el 20/03; feb: 12.320,58 el 23/02)
+- [ ] Las 3 TED del FGC (23/01 29.208,78; 24/03 60.350,41; 08/04 103.059,68)
+      sugieren los rescates de Master, Pleno y Will 2027+2028; suma = 192.618,87
+- [ ] LIQ. CAMBIO 75.760,63 + IOF 833,37 del 29/04 = 76.594,00 = rescate
+      CDB SANT Abr 2026 (vínculo sugerido sobre la suma de ambas filas)
+- [ ] Débito automático tarjeta Inter (sin faturas) aparece como
+      "Tarjeta sin detalle" en los reportes
+- [ ] Auditoría no reporta diferencias para FGC, Deitres ni IPCA+ 2032
+      (ya corregidos en la base el 20/10/2026)
+
+
+═══════════════════════════════════════════════
+T-06 — Tipos de cambio
+═══════════════════════════════════════════════
+
+Servicio `expenses/services/fx.py` + tabla exp_fx_rates.
+- USDBRL_PTAX diario: API Olinda del BCB (PTAX venta).
+- USDARS_MEP diario: API pública de cotizaciones (ej. argentinadatos.com,
+  serie "bolsa"). Verificar endpoint y formato antes de implementar; dejar
+  la fuente en una constante para poder cambiarla.
+- Cache en tabla; fines de semana/feriados → último día hábil anterior.
+- Si la API falla: usar último valor conocido, marcar la fila con
+  needs_review y permitir carga manual en Configuración.
+- Conversión al importar; endpoint POST /api/expenses/fx/recompute?from&to.
+- Movimientos USD de tarjetas argentinas: currency=USD (no convertir con el TC
+  del resumen; el TC del pago "TC1435,000" se guarda solo como dato del pago).
+
+--- Criterios de aceptación T-06 ---
+- [ ] Toda exp_transaction confirmada tiene amount_brl y amount_usd
+- [ ] Cambiar un tipo de cambio manual y recomputar actualiza solo ese rango
+
+
+═══════════════════════════════════════════════
+T-07 — Endpoints de consulta y edición
+═══════════════════════════════════════════════
+
+GET  /api/expenses/summary?from=YYYY-MM&to=YYYY-MM&entity&country&currency=BRL|USD|native
+  Por mes:
+  - gastos = expense (negativos) + refund (positivos, netean) +
+             card_payment de tarjetas sin detalle (ver T-05 B)
+  - por categoría y por entidad
+  - ingresos = income (sin proventos, sin flujos de inversión)
+  - proventos cobrados (aparte)
+  - ahorro = ingresos − gastos
+  EXCLUIDOS siempre: own_transfer, card_payment con fatura, investment_*,
+  fx_conversion.
+GET  /api/expenses/transactions?filters…&page   (kind, category, entity,
+     account, country, from, to, needs_review, texto)
+PATCH /api/expenses/transactions/{id}   (kind, category_id, entity_id, notes,
+     create_rule: bool)
+POST /api/expenses/transactions/bulk     (ids[], mismos campos)
+GET  /api/expenses/review-queue          (sin clasificar, transferencias sin par,
+     pagos de tarjeta sin fatura, inversiones/proventos sin vincular,
+     signo inconsistente con kind, FX faltante)
+GET  /api/expenses/installments/upcoming  cuotas pendientes por mes y tarjeta,
+     desde la última fatura importada de cada tarjeta (n+1..N × monto).
+     Es dato, no proyección.
+POST /api/expenses/links/{id}/confirm | /reject
+CRUD /api/expenses/accounts | /categories | /entities | /rules
+
+--- Criterios de aceptación T-07 ---
+- [ ] Con XP + Inter ene–sep: el gasto de la cuenta XP no incluye los
+      ~R$ 370k de flujos internos/inversión del semestre (solo consumo real,
+      del orden de R$ 27k en ene–jun más las faturas)
+- [ ] El total del summary coincide con la suma de movimientos clasificados
+      (test de consistencia)
+
+
+═══════════════════════════════════════════════
+T-08 — Frontend
+═══════════════════════════════════════════════
+
+Ítem nuevo en Sidebar: `{ to: '/gastos', label: 'Gastos', Icon: Wallet }`.
+Ruta `/gastos` con pestañas internas (query param `?tab=`):
+
+1. Resumen
+   - KPIs: gasto del mes, promedio 6 meses, ingresos, ahorro, % pendiente de revisar.
+   - Barras apiladas por categoría × mes (Recharts, `<Cell>` por categoría).
+   - Tabla categoría × mes con totales.
+   - Filtros: entidad, país, moneda (BRL / USD / nativa), rango de meses.
+   - Bloque "Cuotas comprometidas" (próximos 6 meses) desde /installments/upcoming.
+2. Movimientos
+   - Tabla con el mismo patrón que la página Transacciones (filtros + modal) con filtros, edición inline de tipo/categoría/
+     entidad (combobox reutilizando el patrón InstrumentCombobox), selección
+     múltiple + edición masiva, checkbox "crear regla" con preview del impacto.
+3. Revisar
+   - Cola de T-07 review-queue agrupada por motivo, con acciones directas
+     (clasificar, confirmar/rechazar vínculo, elegir instrumento/provento).
+4. Importar
+   - Wizard: subir archivo → preview (parser detectado, cuenta, período,
+     checks en verde/rojo, duplicados, clasificación propuesta) → confirmar.
+   - Historial de lotes con opción de borrar.
+5. Configuración
+   - Cuentas (incl. owner_identifiers, paid_from_account, has_statements),
+     categorías, entidades, reglas (orden por drag o campo priority),
+     tipos de cambio manuales.
+
+--- Criterios de aceptación T-08 ---
+- [ ] Funciona en modo Demo y Real (header X-Env vía client.ts)
+- [ ] Ningún componente de inversiones se modifica salvo Sidebar y App.tsx
+- [ ] `npm run build` sin errores de TypeScript
+
+
+═══════════════════════════════════════════════
+T-09 — Datos demo
+═══════════════════════════════════════════════
+
+Extender `create_demo_db.py`: 2 cuentas (una AR, una BR), 1 tarjeta, ~6 meses
+de movimientos ficticios que incluyan transferencias propias, pago de
+tarjeta con fatura, cuotas, un provento y un movimiento de inversión.
+Sin datos reales.
+
+
+═══════════════════════════════════════════════
+T-10 — Carga inicial con datos reales
+═══════════════════════════════════════════════
+
+Cuentas a crear (identificadores se cargan desde la UI, no en código):
+  AR: Santander AR cuenta (ARS+USD), Santander AR VISA, Santander AR AMEX,
+      Mercado Pago, Mastercard AR (has_statements=0; pagada desde Santander AR).
+  BR: XP cuenta, XP tarjeta (paga desde XP cuenta), Inter cuenta,
+      Inter tarjeta (has_statements=0; paga desde Inter cuenta),
+      Santander BR (has_statements=0), Bradesco (has_statements=0).
+
+Importar todos los archivos de `docs/expenses/` y verificar los criterios de
+T-02, T-04, T-05 y T-07. Reportar en el PR: % clasificado automático,
+cantidad en cola de revisión por motivo.
+
+
+═══════════════════════════════════════════════
+PENDIENTES CONOCIDOS (no bloquean v1)
+═══════════════════════════════════════════════
+- Faturas de la tarjeta Inter: no hay extracto todavía → "Tarjeta sin detalle".
+- Mastercard AR pagada como "Pago de servicios Mastercard" desde Santander AR:
+  sin resúmenes → "Tarjeta sin detalle".
+- Extractos de Santander BR y Bradesco: sus Pix con Inter/XP quedan como
+  "contraparte no importada".
+- Entidad de VIVO / Telefonica (¿Bertioga o Personal?): a confirmar.
+- Flujos argentinos sin regla (transferencias familiares, ingresos de
+  terceros, plan de ahorro Toyota): clasificación manual en la primera carga.
+
+
+═══════════════════════════════════════════════
+v2 (referencia, NO implementar ahora)
+═══════════════════════════════════════════════
+- Proyección: gasto recurrente (mediana 6m por categoría) + cuotas comprometidas.
+- Anomalías: por categoría en USD (Argentina en USD MEP), mediana ± k·MAD;
+  alertas de suscripciones nuevas, cargos financieros (siempre alerta) y
+  gastos individuales fuera de rango.
+- Cruces con inversiones: tasa de ahorro vs aportes, % de gastos cubierto por
+  proventos, meses de gastos cubiertos por el patrimonio.
+
+
+═══════════════════════════════════════════════
+PASO FINAL
+═══════════════════════════════════════════════
+1. Crear `CONTEXT-expenses.md` en la raíz: modelo de datos, parsers, reglas de
+   clasificación y conciliación, endpoints, páginas. En `CONTEXT.md` agregar
+   solo una referencia a ese archivo + el ítem de Sidebar.
+2. Seguir el resto del PASO FINAL de `.claude/CLAUDE.md` (fecha, commit de
+   docs, mover este spec a `specs/done/`, notificaciones).
+3. Verificar con `git status` / `git log -p` que no se commiteó ningún
+   archivo de `docs/expenses/` ni `*.local.json`.
