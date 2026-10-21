@@ -89,6 +89,42 @@ def link_pairs(db: Session) -> int:
     return n
 
 
+ADOPTABLE_KINDS = ("income", "expense", "refund", "unknown")
+
+
+def adopt_counterparts(db: Session) -> int:
+    """Una transferencia propia sin par adopta a su contraparte exacta aunque ésta no se haya
+    reconocido como propia (p. ej. el banco receptor muestra otro nombre para la billetera de origen).
+
+    Sólo si: otra cuenta, importe y moneda idénticos, signo opuesto, a lo sumo 1 día de diferencia,
+    candidato único para ambos lados y la contraparte no fue clasificada a mano.
+    """
+    lonely = _unlinked(db, "own_transfer")
+    candidates = db.query(ExpTransaction).filter(
+        ExpTransaction.kind.in_(ADOPTABLE_KINDS), ExpTransaction.classification_source != "manual").all()
+    by_key = defaultdict(list)
+    for c in candidates:
+        by_key[(cents(abs(c.amount)), c.currency, c.amount > 0)].append(c)
+    cand_for: dict[int, list[ExpTransaction]] = {}
+    for t in lonely:
+        cand_for[t.id] = [c for c in by_key.get((cents(abs(t.amount)), t.currency, t.amount < 0), [])
+                          if c.account_id != t.account_id and abs((c.date - t.date).days) <= 1]
+    claims = defaultdict(list)
+    for t in lonely:
+        for c in cand_for[t.id]:
+            claims[c.id].append(t)
+    n = 0
+    for t in lonely:
+        cs = cand_for[t.id]
+        if len(cs) == 1 and len(claims[cs[0].id]) == 1:
+            c = cs[0]
+            c.kind, c.classification_source, c.rule_id, c.needs_review = "own_transfer", "own_account", None, False
+            t.transfer_group_id = c.transfer_group_id = min(t.id, c.id)
+            n += 1
+    db.commit()
+    return n
+
+
 def pair_suggestions(db: Session) -> list[dict]:
     """Candidatos ambiguos o de Δ mayor al de auto-confirmación (no se persisten)."""
     out = []
@@ -146,7 +182,9 @@ def link_statements(db: Session) -> int:
 
 
 def rebuild(db: Session) -> dict:
-    return {"pairs": link_pairs(db), "statements": link_statements(db)}
+    pairs = link_pairs(db)
+    adopted = adopt_counterparts(db)
+    return {"pairs": pairs, "adopted": adopted, "statements": link_statements(db)}
 
 
 def is_exact_statement_link(db: Session, tx: ExpTransaction) -> bool:

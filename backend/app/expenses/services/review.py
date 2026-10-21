@@ -8,6 +8,8 @@ from app.expenses.services.summary import bucket
 
 # Descripciones que delatan una cuenta propia que no se importa (p. ej. la cuenta de inversión del banco).
 NOT_IMPORTED_MARKERS = ("conta investimento",)
+# Movimientos entre bolsillos de una misma cuenta (p. ej. reservas de Mercado Pago): no tienen par por diseño.
+INTERNAL_MARKERS = ("dinero reservado", "dinero retirado")
 
 
 def _item(t: ExpTransaction, **extra) -> dict:
@@ -35,6 +37,8 @@ def review_queue(db: Session) -> dict:
     unpaired, unpaired_info = [], []
     for t in txs:
         if t.kind == "own_transfer" and t.transfer_group_id is None:
+            if any(m in t.description_raw.lower() for m in INTERNAL_MARKERS):
+                continue
             covered = (not any(m in t.description_raw.lower() for m in NOT_IMPORTED_MARKERS)
                        and any(a != t.account_id and s <= t.date <= e for a, s, e in spans))
             # con otra cuenta propia importada que cubre la fecha, la falta de par es sospechosa;

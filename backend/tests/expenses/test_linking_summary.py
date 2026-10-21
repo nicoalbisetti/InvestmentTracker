@@ -262,3 +262,32 @@ def test_fx_recompute_only_touches_range(client, db):
     assert client.post("/api/expenses/fx/recompute", params={"from": "2026-03-01", "to": "2026-03-31"}).json() == {"recomputed": 1}
     db.expire_all()
     assert t1.amount_usd == -5.0 and t2.amount_usd == 0.0
+
+
+# ---------- adopción de contraparte ----------
+def test_own_transfer_adopts_unrecognized_exact_counterpart(db):
+    a, b = acct(db, "A"), acct(db, "B")
+    o = tx(db, a, D(2026, 4, 10), -800000, "own_transfer")
+    i = tx(db, b, D(2026, 4, 10), 800000, "income", needs_review=True)
+    assert linking.rebuild(db)["adopted"] == 1
+    assert i.kind == "own_transfer" and i.classification_source == "own_account" and not i.needs_review
+    assert o.transfer_group_id == i.transfer_group_id is not None
+
+
+def test_adoption_never_touches_manual_or_far_or_ambiguous(db):
+    a, b = acct(db, "A"), acct(db, "B")
+    tx(db, a, D(2026, 4, 10), -100, "own_transfer")
+    man = tx(db, b, D(2026, 4, 10), 100, "income", classification_source="manual")
+    far = tx(db, b, D(2026, 4, 14), 100, "income")
+    assert linking.adopt_counterparts(db) == 0 and man.kind == far.kind == "income"
+    tx(db, a, D(2026, 5, 1), -50, "own_transfer")
+    x1 = tx(db, b, D(2026, 5, 1), 50, "income"); x2 = tx(db, b, D(2026, 5, 1), 50, "income")
+    assert linking.adopt_counterparts(db) == 0 and x1.kind == x2.kind == "income"
+
+
+def test_internal_pocket_moves_do_not_clutter_the_queue(db):
+    a = acct(db, "MP")
+    tx(db, a, D(2026, 1, 10), -100, "own_transfer", desc="Dinero reservado Gastos")
+    tx(db, a, D(2026, 1, 11), 100, "own_transfer", desc="Dinero retirado Gastos")
+    q = review.review_queue(db)
+    assert q["unpaired_transfers"] == [] and q["unpaired_transfers_counterparty_not_imported"] == []

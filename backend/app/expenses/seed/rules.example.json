@@ -386,5 +386,58 @@
   "priority": 440,
   "field": "description_raw",
   "amount_sign": "negative"
+ },
+ {
+  "seed_key": "ar_card_pay_account",
+  "priority": 450,
+  "field": "description_raw",
+  "pattern": "^Pago (de )?tarjeta de credito",
+  "amount_sign": "negative",
+  "kind": "card_payment"
+ },
+ {
+  "seed_key": "ar_bank_comision",
+  "pattern": "^Comision ",
+  "kind": "expense",
+  "category": "Cargos bancarios",
+  "amount_sign": "negative",
+  "priority": 460,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_bank_iva",
+  "pattern": "^Iva 21%",
+  "kind": "expense",
+  "category": "Cargos bancarios",
+  "amount_sign": "negative",
+  "priority": 470,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_bank_ley25413",
+  "pattern": "^Impuesto ley 25\\.413",
+  "kind": "expense",
+  "category": "Impuestos",
+  "priority": 480,
+  "field": "description_raw",
+  "amount_sign": "any"
+ },
+ {
+  "seed_key": "ar_bank_interes",
+  "pattern": "^Pago interes por saldo",
+  "kind": "income",
+  "category": "Rendimientos",
+  "amount_sign": "positive",
+  "priority": 490,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_promo_modo",
+  "pattern": "^Promo modo",
+  "kind": "refund",
+  "category": "Otros",
+  "amount_sign": "positive",
+  "priority": 500,
+  "field": "description_raw"
  }
 ]

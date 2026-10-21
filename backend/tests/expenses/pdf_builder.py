@@ -7,7 +7,7 @@ def _esc(s: str) -> str:
 
 
 def build_pdf(pages: list[dict]) -> bytes:
-    """pages: [{"texts": [(x, top, texto)], "rules": [(x, top, ancho)]}]"""
+    """pages: [{"texts": [(x, top, texto)], "rules": [(x, top, ancho)], "boxes": [(x, top, ancho, alto)]}]"""
     objs: list[bytes] = []
     n = len(pages)
     kids = " ".join(f"{4 + 2 * i} 0 R" for i in range(n))
@@ -17,9 +17,11 @@ def build_pdf(pages: list[dict]) -> bytes:
     for i, pg in enumerate(pages):
         ops = []
         for x, top, text in pg.get("texts", []):
-            ops.append(f"BT /F1 8 Tf {x:.2f} {H - top - 8:.2f} Td ({_esc(text)}) Tj ET")
+            ops.append(f"BT /F1 6.5 Tf {x:.2f} {H - top - 8:.2f} Td ({_esc(text)}) Tj ET")
         for x, top, w in pg.get("rules", []):
             ops.append(f"{x:.2f} {H - top:.2f} {w:.2f} 0.75 re f")
+        for x, top, w, h in pg.get("boxes", []):  # rectángulos con alto (celdas de encabezado)
+            ops.append(f"{x:.2f} {H - top - h:.2f} {w:.2f} {h:.2f} re f")
         stream = "\n".join(ops).encode("cp1252", "replace")
         page_no, content_no = 4 + 2 * i, 5 + 2 * i
         objs.append(
