@@ -38,7 +38,8 @@ def _json_safe(v):
 
 def create_preview(db: Session, data: bytes, filename: str, account_id: Optional[int] = None,
                    due_date: Optional[date] = None, fetch=None) -> dict:
-    parser = detect_parser(filename, data[:4096])
+    # los PDF se detectan por contenido (necesitan el archivo completo); los CSV, por su cabecera
+    parser = detect_parser(filename, data if data[:5] == b"%PDF-" else data[:4096])
     if parser is None:
         raise ImportError_(422, "Formato no reconocido")
 

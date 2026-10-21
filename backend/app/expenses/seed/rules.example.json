@@ -359,5 +359,32 @@
   "amount_sign": "any",
   "kind": "expense",
   "category": "Supermercado"
+ },
+ {
+  "seed_key": "ar_mp_suscripcion",
+  "pattern": "^Pago de suscripci",
+  "kind": "expense",
+  "category": "Suscripciones",
+  "priority": 420,
+  "field": "description_raw",
+  "amount_sign": "negative"
+ },
+ {
+  "seed_key": "ar_mp_servicios",
+  "pattern": "^Pago de servicio (Personal|Claro|Movistar|Telecentro|Edenor|Edesur|Metrogas|Aysa|Naturgy)",
+  "kind": "expense",
+  "category": "Servicios",
+  "priority": 430,
+  "field": "description_raw",
+  "amount_sign": "negative"
+ },
+ {
+  "seed_key": "ar_mp_qr",
+  "pattern": "^Pago con QR",
+  "kind": "expense",
+  "category": "Otros",
+  "priority": 440,
+  "field": "description_raw",
+  "amount_sign": "negative"
  }
 ]

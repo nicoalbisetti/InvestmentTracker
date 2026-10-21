@@ -21,7 +21,7 @@ def parse_money(val) -> Optional[Decimal]:
     if not s or s in ("-", "nan", "None"):
         return None
     negative = "-" in s
-    s = s.replace("R$", "").replace("U$S", "").replace("$", "").replace("-", "").strip()
+    s = s.replace("R$", "").replace("U$S", "").replace("US$", "").replace("$", "").replace("-", "").strip()
     s = _SPACE_DEC.sub(r"\1,\2", s)
     s = s.replace(" ", "")
     if not s:
