@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.expenses.db import get_exp_db
 from app.expenses.models import ExpCategory, ExpEntity, ExpTransaction
-from app.expenses.services import fx, linking, merchants, review, summary as summary_svc
+from app.expenses.services import fx, installments, linking, merchants, review, summary as summary_svc
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
@@ -177,3 +177,9 @@ def apply_unpaired_groups(body: CounterpartyApply, db: Session = Depends(get_exp
         return merchants.apply_counterparty(db, [i.model_dump() for i in body.items])
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+
+@router.get("/installments/upcoming")
+def upcoming_installments(months: int = Query(6, ge=1, le=36), db: Session = Depends(get_exp_db)):
+    """Cuotas ya comprometidas por mes y tarjeta, desde la última fatura importada de cada tarjeta."""
+    return installments.upcoming(db, months)

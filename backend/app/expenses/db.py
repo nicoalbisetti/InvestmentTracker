@@ -33,14 +33,15 @@ def create_expense_tables(engines=None, with_demo=True):
     from app.expenses import models  # noqa: F401  (registra tablas)
     from app.expenses.migrations import run_migrations
     from app.expenses.seed.base import seed_base_data
-    from app.expenses.services.rules import load_seed_rules
+    from app.expenses.services.rules import EXAMPLE_RULES, load_seed_rules
 
     for eng in engines or (exp_engine, exp_demo_engine):
         ExpBase.metadata.create_all(bind=eng)
         run_migrations(eng)
         with sessionmaker(bind=eng)() as db:
             seed_base_data(db)
-            load_seed_rules(db)
+            # la demo NUNCA carga las reglas locales (tienen nombres reales): sólo el ejemplo
+            load_seed_rules(db, EXAMPLE_RULES) if eng is exp_demo_engine else load_seed_rules(db)
             if with_demo and eng is exp_demo_engine:
                 from app.expenses.models import ExpAccount
                 if db.query(ExpAccount).count() == 0:

@@ -46,3 +46,13 @@ def test_regenerate_endpoint_targets_demo_db(client, monkeypatch, engine):
     monkeypatch.setattr(demo_router, "ExpDemoSessionLocal", sessionmaker(bind=engine))
     r = client.post("/api/expenses/demo/regenerate", headers={"X-Env": "production"})
     assert r.status_code == 200 and r.json()["accounts"] == 4
+
+
+def test_demo_rules_never_come_from_local_file(db):
+    """Si había reglas semilla con nombres reales (p. ej. de un rules.local.json), la demo las reemplaza por el ejemplo."""
+    from app.expenses.models import ExpRule
+    db.add(ExpRule(pattern="NOMBRE REAL DE UN TERCERO", field="description_raw", set_kind="expense", origin="manual"))   # p. ej. una semilla real que se movió y pasó a manual
+    db.commit()
+    seed_demo(db)
+    patterns = [r.pattern for r in db.query(ExpRule)]
+    assert "NOMBRE REAL DE UN TERCERO" not in patterns and any("EJEMPLO" in p for p in patterns)

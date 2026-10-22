@@ -125,3 +125,32 @@ export const getUnpairedGroups = (limit = 100): Promise<UnpairedGroup[]> =>
 export const applyUnpairedGroups = (items: { key: string; sign: string; account_id: number }[]):
   Promise<{ key: string; rule_id: number; assigned: number }[]> =>
   client.post(`${B}/review/unpaired-groups/apply`, { items }).then(r => r.data);
+
+export interface ExpRule {
+  id: number; priority: number; account_id: number | null; field: string; pattern: string; amount_sign: string; set_kind: string;
+  set_category_id: number | null; set_entity_id: number | null; set_merchant: string | null; set_needs_review: boolean;
+  set_counterparty_account_id: number | null; set_exclude_from_audit: boolean; active: boolean; origin: 'seed' | 'manual';
+}
+export type RuleInput = Partial<Omit<ExpRule, 'id' | 'origin'>> & { pattern?: string; set_kind?: string; apply_to_pending?: boolean };
+export const getRules = (): Promise<ExpRule[]> => client.get(`${B}/rules`).then(r => r.data);
+export const createRule = (d: RuleInput): Promise<ExpRule & { applied: number }> => client.post(`${B}/rules`, d).then(r => r.data);
+export const patchRule = (id: number, d: RuleInput): Promise<ExpRule & { applied: number }> => client.patch(`${B}/rules/${id}`, d).then(r => r.data);
+export const deleteRule = (id: number) => client.delete(`${B}/rules/${id}`).then(r => r.data);
+export const reorderRules = (ids: number[]): Promise<{ moved: number }> => client.post(`${B}/rules/reorder`, { ids }).then(r => r.data);
+export const createCategory = (name: string) => client.post(`${B}/categories`, { name }).then(r => r.data);
+
+export interface FxRate { date: string; rate: number; source: string }
+export const getFxRates = (pair: string, from: string, to: string): Promise<FxRate[]> =>
+  client.get(`${B}/fx/rates`, { params: { pair, date_from: from, date_to: to } }).then(r => r.data);
+export const putFxRate = (pair: string, date: string, rate: number) => client.put(`${B}/fx/rates`, { pair, date, rate }).then(r => r.data);
+export const deleteFxRate = (pair: string, date: string): Promise<{ restored: boolean; errors: string[] }> =>
+  client.delete(`${B}/fx/rates`, { params: { pair, date } }).then(r => r.data);
+export const recomputeFx = (from: string, to: string): Promise<{ recomputed: number }> =>
+  client.post(`${B}/fx/recompute`, null, { params: { from, to } }).then(r => r.data);
+
+export interface InstallmentMonth {
+  month: string; total_brl: number; by_card: Record<string, number>;
+  items: { card: string; merchant: string; installment: number; of: number; amount: number; currency: string; amount_brl: number }[];
+}
+export interface Installments { cards: { account_id: number; name: string; last_statement_due: string; stale: boolean }[]; months: InstallmentMonth[] }
+export const getInstallments = (months = 6): Promise<Installments> => client.get(`${B}/installments/upcoming`, { params: { months } }).then(r => r.data);

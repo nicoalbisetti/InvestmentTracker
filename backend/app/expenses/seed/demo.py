@@ -11,8 +11,9 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from app.expenses.models import (
-    ExpAccount, ExpCategory, ExpEntity, ExpImportBatch, ExpLink, ExpTransaction,
+    ExpAccount, ExpCategory, ExpEntity, ExpImportBatch, ExpLink, ExpRule, ExpTransaction,
 )
+from app.expenses.services.rules import EXAMPLE_RULES, load_seed_rules
 
 USD_BRL, ARS_USD = 5.0, 1000.0
 MONTHS = [(2026, m) for m in range(4, 10)]
@@ -34,7 +35,10 @@ def seed_demo(db: Session) -> dict:
     """Borra los datos de gastos de la base demo y los vuelve a generar (determinístico)."""
     for model in (ExpLink, ExpTransaction, ExpImportBatch, ExpAccount):
         db.query(model).delete()
+    # la demo es descartable: sus reglas son siempre las del ejemplo (sin nombres reales), incluso las que se editaron o movieron
+    db.query(ExpRule).delete()
     db.commit()
+    load_seed_rules(db, EXAMPLE_RULES)
     rnd = random.Random(42)
     cat = {c.name: c.id for c in db.query(ExpCategory)}
     ent = {e.code: e.id for e in db.query(ExpEntity)}

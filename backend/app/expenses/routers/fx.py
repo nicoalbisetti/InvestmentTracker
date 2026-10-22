@@ -36,3 +36,14 @@ def list_rates(pair: str, date_from: date, date_to: date, db: Session = Depends(
         .order_by(ExpFxRate.date)
     )
     return [{"date": r.date.isoformat(), "rate": r.rate, "source": r.source} for r in rows]
+
+
+@router.delete("/rates")
+def delete_manual_rate(pair: str, date: date, db: Session = Depends(get_exp_db)):
+    """Quita una carga manual y vuelve a pedir el valor de la fuente para ese día."""
+    row = db.get(ExpFxRate, (date, pair))
+    if row is None or row.source != "manual":
+        raise HTTPException(404, "No hay carga manual para ese día")
+    db.delete(row); db.commit()
+    errors = fx.refresh(db, date, date, pairs=(pair,))
+    return {"restored": not errors, "errors": errors}

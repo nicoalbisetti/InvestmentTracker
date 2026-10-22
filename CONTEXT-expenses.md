@@ -143,12 +143,15 @@ PTAX venta (BCB Olinda; sólo días hábiles → día anterior) y MEP venta (arg
 | POST | `/links/{id}/confirm`, `/links/{id}/reject` | |
 | GET | `/audit/investments?from&to` | Auditoría de sólo lectura |
 | GET/POST | `/rules`, `/rules/preview` | Reglas; vista previa de impacto; alta con `apply_to_pending` |
+| PATCH/DELETE | `/rules/{id}` | Editar (una semilla editada pasa a `manual` y las recargas ya no la pisan; `apply_to_pending`) / borrar (sólo manuales: las semilla se desactivan) |
+| POST | `/rules/reorder` | `{ids:[todas]}`: orden de evaluación; sólo cambian de prioridad las reglas que se mueven |
 | POST | `/rules/reapply?include_rule_rows=` | Pasa los pendientes (no manuales) por las reglas vigentes; con `include_rule_rows=true` re-evalúa también las ya clasificadas por una regla |
 | GET/POST | `/review/unpaired-groups`, `/review/unpaired-groups/apply` | Transferencias propias sin par agrupadas por descripción; asigna la cuenta de contraparte (regla + filas) y reintenta el pareo |
 | GET | `/review/merchant-groups` | Pendientes agrupados por comercio y signo, de mayor a menor monto |
 | POST | `/review/merchant-groups/apply` | `{items:[{key, sign, kind, category_id?, entity_id?}]}`: una regla anclada por comercio, aplicada a sus filas pendientes |
 | GET/POST | `/categories`; GET `/entities` | |
-| PUT/GET | `/fx/rates`; POST `/fx/recompute` | Tipos de cambio manuales / recálculo por rango |
+| PUT/GET/DELETE | `/fx/rates`; POST `/fx/recompute` | Tipos de cambio: carga manual, listado, quitar una carga manual (restaura la fuente) / recálculo por rango |
+| GET | `/installments/upcoming?months=` | Cuotas comprometidas por mes y tarjeta desde la última fatura importada (dato, no proyección) |
 | POST | `/demo/regenerate` | Regenera los datos ficticios de la base **demo** (ignora el header) |
 
 ## 11. Frontend (`/gastos`)
@@ -156,7 +159,7 @@ PTAX venta (BCB Olinda; sólo días hábiles → día anterior) y MEP venta (arg
 `src/pages/expenses/GastosPage.tsx` con pestañas por `?tab=`: **Resumen** (KPIs, barras apiladas categoría × mes,
 tabla, filtros, cobertura), **Movimientos** (filtros, edición inline, selección múltiple + edición masiva, "crear regla"
 con confirmación del impacto), **Revisar** (comercios sin clasificar agrupados con "crear N reglas", cola por motivo, vincular pares, confirmar/rechazar vínculos con Inversiones,
-auditoría), **Importar** (wizard + historial con borrado), **Configuración** (cuentas e identificadores propios).
+auditoría), **Importar** (wizard + historial con borrado), **Configuración** (subsecciones: **Cuentas** e identificadores propios; **Reglas** —editar, activar, borrar, crear con vista previa de impacto y reordenar arrastrando—; **Tipos de cambio** —ver, cargar a mano, quitar y recalcular un rango—; **Categorías**). El Resumen incluye el bloque **Cuotas comprometidas**. Los selectores de categoría/entidad usan un `Combobox` con búsqueda (sin acentos, con teclado).
 Código: `src/components/expenses/*`, `src/api/expenses.ts`, `src/utils/expenses.ts`. Ítem "Gastos" en `Sidebar.tsx`
 y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
 
@@ -194,5 +197,5 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
 - Sección de dólares de la cuenta Santander AR y AMEX con USD sólo cubiertas por PDF sintéticos (los extractos reales
   no traen movimientos en esos casos).
 - Sin clasificar: transferencias a personas (AR) en su mayoría; se resuelven con tu criterio en Revisar.
-- No implementado de la spec: `installments/upcoming`, combobox con búsqueda, edición de reglas/TC en la UI, drag de
-  prioridad de reglas. v2 (proyecciones, anomalías, cruces con Inversiones) fuera de alcance.
+- Spec no implementada: sólo la v2 (proyecciones, anomalías, cruces con Inversiones), fuera de alcance.
+- La base **demo** de gastos usa siempre `rules.example.json` (nunca `rules.local.json`) y `seed_demo` descarta todas sus reglas al regenerar.
