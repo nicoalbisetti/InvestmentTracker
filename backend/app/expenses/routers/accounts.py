@@ -15,7 +15,7 @@ def _out(a: ExpAccount, with_identifiers: bool = False) -> dict:
         "id": a.id, "name": a.name, "institution": a.institution, "country": a.country,
         "kind": a.kind, "currency": a.currency, "parser_key": a.parser_key,
         "paid_from_account_id": a.paid_from_account_id, "default_entity_id": a.default_entity_id,
-        "has_statements": a.has_statements, "active": a.active,
+        "has_statements": a.has_statements, "itemizes_investments": a.itemizes_investments, "active": a.active,
     }
     if with_identifiers:  # sensible: sólo en el detalle de configuración
         d["owner_identifiers"] = a.owner_identifiers or []
@@ -33,6 +33,7 @@ class AccountIn(BaseModel):
     paid_from_account_id: Optional[int] = None
     default_entity_id: Optional[int] = None
     has_statements: bool = True
+    itemizes_investments: bool = False
 
 
 class AccountPatch(BaseModel):
@@ -42,6 +43,7 @@ class AccountPatch(BaseModel):
     paid_from_account_id: Optional[int] = None
     default_entity_id: Optional[int] = None
     has_statements: Optional[bool] = None
+    itemizes_investments: Optional[bool] = None
     active: Optional[bool] = None
 
 

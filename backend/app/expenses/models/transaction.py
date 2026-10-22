@@ -49,6 +49,9 @@ class ExpTransaction(ExpBase):
     notes = Column(Text, nullable=True)
     # Vínculos internos como columnas directas (ver revisión §3.2)
     transfer_group_id = Column(Integer, nullable=True, index=True)  # par own_transfer
+    # cuenta propia a la que va/de la que viene una transferencia (aunque no se importe): guía el pareo y la cola
+    counterparty_account_id = Column(Integer, ForeignKey("exp_accounts.id"), nullable=True)
+    exclude_from_audit = Column(Boolean, nullable=False, default=False)  # aporte que no se rastrea en Inversiones (p. ej. cripto)
     statement_batch_id = Column(Integer, ForeignKey("exp_import_batches.id"), nullable=True)  # card_payment -> resumen
     dedup_hash = Column(String, nullable=False, unique=True)
     created_at = Column(DateTime, default=datetime.utcnow)

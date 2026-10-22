@@ -48,8 +48,12 @@ def _edges(txs: list[ExpTransaction], kind: str) -> list[Edge]:
     for a in outs:
         for b in ins.get((cents(-a.amount), a.currency), []):
             d = abs((b.date - a.date).days)
-            if b.account_id != a.account_id and d <= window:
-                edges.append(Edge(a, b, d))
+            if b.account_id == a.account_id or d > window:
+                continue
+            # la cuenta de contraparte declarada (si hay) debe ser la otra punta
+            if a.counterparty_account_id not in (None, b.account_id) or b.counterparty_account_id not in (None, a.account_id):
+                continue
+            edges.append(Edge(a, b, d))
     return edges
 
 
@@ -431,10 +435,12 @@ def audit_investments(db: Session, inv: Session, date_from: Optional[date] = Non
     bank_without = [
         {"id": e.id, "date": e.date.isoformat(), "description": e.description_raw, "amount": e.amount}
         for e in db.query(ExpTransaction).filter(
-            ExpTransaction.kind.in_(("investment_contribution", "investment_withdrawal"))).order_by(ExpTransaction.date)
+            ExpTransaction.kind.in_(("investment_contribution", "investment_withdrawal")),
+            ExpTransaction.exclude_from_audit.is_(False)).order_by(ExpTransaction.date)
         if in_range(e.date) and e.id not in linked_exp]
 
-    institutions = [a.institution.lower() for a in db.query(ExpAccount) if a.has_statements]
+    # sólo se cruzan las custodias cuyo extracto detalla los aportes/rescates por inversión
+    institutions = [a.institution.lower() for a in db.query(ExpAccount) if a.has_statements and a.itemizes_investments]
     inst = {i.id: i for i in inv.query(Instrument)}
     tx_without = []
     for t in inv.query(Transaction).filter(Transaction.type.in_(("aplicacion", "rescate"))).order_by(Transaction.date):

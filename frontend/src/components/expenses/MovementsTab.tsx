@@ -50,7 +50,7 @@ export default function MovementsTab() {
   const pages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const entId = (code: string | null) => entities.find(e => e.code === code)?.id ?? '';
 
-  const edit = async (t: ExpTx, change: { kind?: string; category_id?: number | null; entity_id?: number | null }) => {
+  const edit = async (t: ExpTx, change: { kind?: string; category_id?: number | null; entity_id?: number | null; counterparty_account_id?: number | null }) => {
     const body: Record<string, unknown> = { ...change };
     if (makeRule && t.merchant) {
       const probe = await previewRule({
@@ -118,7 +118,7 @@ export default function MovementsTab() {
             <tr>
               <th className="px-3 py-3 w-8"><input type="checkbox" checked={data.items.length > 0 && data.items.every(t => selected.has(t.id))}
                 onChange={e => setSelected(e.target.checked ? new Set(data.items.map(t => t.id)) : new Set())} /></th>
-              {['Fecha', 'Cuenta', 'Descripción', 'Importe', 'Tipo', 'Categoría', 'Entidad'].map(h =>
+              {['Fecha', 'Cuenta', 'Descripción', 'Importe', 'Tipo', 'Contraparte / categoría', 'Entidad'].map(h =>
                 <th key={h} className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>)}
             </tr>
           </thead>
@@ -145,10 +145,18 @@ export default function MovementsTab() {
                   </select>
                 </td>
                 <td className="px-3 py-2">
-                  <select className="input text-xs py-1" value={t.category_id ?? ''} onChange={e => e.target.value && edit(t, { category_id: Number(e.target.value) })}>
-                    <option value="">—</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
+                  {t.kind === 'own_transfer' ? (
+                    <select className="input text-xs py-1" title="Cuenta propia de la otra punta (aunque no se importe)"
+                      value={t.counterparty_account_id ?? ''} onChange={e => e.target.value && edit(t, { counterparty_account_id: Number(e.target.value) })}>
+                      <option value="">{t.paired ? '(pareada)' : '¿a qué cuenta?'}</option>
+                      {accounts.filter(a => a.id !== t.account_id).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  ) : (
+                    <select className="input text-xs py-1" value={t.category_id ?? ''} onChange={e => e.target.value && edit(t, { category_id: Number(e.target.value) })}>
+                      <option value="">—</option>
+                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   <select className="input text-xs py-1" value={entId(t.entity)} onChange={e => e.target.value && edit(t, { entity_id: Number(e.target.value) })}>

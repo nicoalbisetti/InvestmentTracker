@@ -153,3 +153,27 @@ def apply_merchant_groups(body: GroupApply, db: Session = Depends(get_exp_db)):
         return merchants.apply_groups(db, [i.model_dump() for i in body.items])
     except ValueError as e:
         raise HTTPException(422, str(e))
+
+
+class CounterpartyItem(BaseModel):
+    key: str
+    sign: str = "any"
+    account_id: int
+
+
+class CounterpartyApply(BaseModel):
+    items: list[CounterpartyItem]
+
+
+@router.get("/review/unpaired-groups")
+def unpaired_groups(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_exp_db)):
+    """Transferencias propias sin par ni cuenta de contraparte declarada, agrupadas por descripción."""
+    return merchants.unpaired_groups(db, limit)
+
+
+@router.post("/review/unpaired-groups/apply")
+def apply_unpaired_groups(body: CounterpartyApply, db: Session = Depends(get_exp_db)):
+    try:
+        return merchants.apply_counterparty(db, [i.model_dump() for i in body.items])
+    except ValueError as e:
+        raise HTTPException(422, str(e))

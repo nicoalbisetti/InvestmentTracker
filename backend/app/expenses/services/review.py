@@ -39,8 +39,13 @@ def review_queue(db: Session) -> dict:
         if t.kind == "own_transfer" and t.transfer_group_id is None:
             if any(m in t.description_raw.lower() for m in INTERNAL_MARKERS):
                 continue
-            covered = (not any(m in t.description_raw.lower() for m in NOT_IMPORTED_MARKERS)
-                       and any(a != t.account_id and s <= t.date <= e for a, s, e in spans))
+            cp = accounts.get(t.counterparty_account_id) if t.counterparty_account_id else None
+            if cp is not None:
+                # contraparte declarada: sospechoso sólo si su extracto debería cubrir la fecha y no hay par
+                covered = cp.has_statements and any(a == cp.id and s <= t.date <= e for a, s, e in spans)
+            else:
+                covered = (not any(m in t.description_raw.lower() for m in NOT_IMPORTED_MARKERS)
+                           and any(a != t.account_id and s <= t.date <= e for a, s, e in spans))
             # con otra cuenta propia importada que cubre la fecha, la falta de par es sospechosa;
             # si no, es 'contraparte no importada' (informativo)
             (unpaired if covered else unpaired_info).append(_item(t))
@@ -69,4 +74,4 @@ def _unlinked(db: Session, kinds, link_type: str, by_id: dict) -> list[dict]:
     from app.expenses.models import ExpLink
     linked = {i for (i,) in db.query(ExpLink.exp_transaction_id).filter(
         ExpLink.link_type == link_type, ExpLink.status.in_(("suggested", "confirmed")))}
-    return [_item(t) for t in by_id.values() if t.kind in kinds and t.id not in linked]
+    return [_item(t) for t in by_id.values() if t.kind in kinds and t.id not in linked and not t.exclude_from_audit]

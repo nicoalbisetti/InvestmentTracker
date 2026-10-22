@@ -98,6 +98,7 @@ def create_preview(db: Session, data: bytes, filename: str, account_id: Optional
             "kind": c.kind, "category_id": c.category_id, "entity_id": c.entity_id,
             "merchant_normalized": c.merchant_normalized, "classification_source": c.classification_source,
             "rule_id": c.rule_id, "needs_review": c.needs_review,
+            "counterparty_account_id": c.counterparty_account_id, "exclude_from_audit": c.exclude_from_audit,
             "amount_brl": conv.amount_brl, "amount_usd": conv.amount_usd, "fx_usd_brl": conv.fx_usd_brl,
             "fx_ars_usd": conv.fx_ars_usd, "fx_estimated": conv.estimated,
         })
@@ -174,6 +175,7 @@ def confirm(db: Session, batch_id: int, overrides: Optional[list[dict]] = None, 
             classification_source="manual" if manual else row["classification_source"],
             rule_id=None if manual else row["rule_id"],
             needs_review=False if manual else row["needs_review"], dedup_hash=row["dedup_hash"],
+            counterparty_account_id=row.get("counterparty_account_id"), exclude_from_audit=bool(row.get("exclude_from_audit")),
         )
         try:
             with db.begin_nested():

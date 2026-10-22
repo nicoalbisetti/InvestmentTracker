@@ -19,6 +19,8 @@ class ExpRule(ExpBase):
     set_entity_id = Column(Integer, ForeignKey("exp_entities.id"), nullable=True)
     set_merchant = Column(String, nullable=True)
     set_needs_review = Column(Boolean, nullable=False, default=False)  # la regla clasifica pero deja la fila en revisión
+    set_counterparty_account_id = Column(Integer, ForeignKey("exp_accounts.id"), nullable=True)
+    set_exclude_from_audit = Column(Boolean, nullable=False, default=False)
     active = Column(Boolean, nullable=False, default=True)
     origin = Column(String, nullable=False, default="manual")  # seed | manual
     seed_key = Column(String, nullable=True, unique=True)      # clave estable para re-seed idempotente

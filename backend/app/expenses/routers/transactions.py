@@ -28,6 +28,7 @@ def _out(t: ExpTransaction, acc: ExpAccount, cats: dict, ents: dict) -> dict:
         "installment_number": t.installment_number, "installment_total": t.installment_total,
         "classification_source": t.classification_source, "needs_review": t.needs_review,
         "notes": t.notes, "paired": t.transfer_group_id is not None,
+        "counterparty_account_id": t.counterparty_account_id, "exclude_from_audit": t.exclude_from_audit,
         "statement_batch_id": t.statement_batch_id, "fx_estimated": t.fx_estimated,
     }
 
@@ -77,6 +78,8 @@ class TxPatch(BaseModel):
     category_id: Optional[int] = None
     entity_id: Optional[int] = None
     notes: Optional[str] = None
+    counterparty_account_id: Optional[int] = None
+    exclude_from_audit: Optional[bool] = None
     create_rule: bool = False
 
 
@@ -109,6 +112,12 @@ def patch_transaction(tx_id: int, body: TxPatch, db: Session = Depends(get_exp_d
     _apply(db, t, body.model_dump())
     if body.notes is not None:
         t.notes = body.notes
+    if body.counterparty_account_id is not None:
+        if db.get(ExpAccount, body.counterparty_account_id) is None:
+            raise HTTPException(422, "cuenta de contraparte inexistente")
+        t.counterparty_account_id = body.counterparty_account_id
+    if body.exclude_from_audit is not None:
+        t.exclude_from_audit = body.exclude_from_audit
     applied = 0
     if body.create_rule:
         key = match_key(t.merchant_normalized or t.description_raw)

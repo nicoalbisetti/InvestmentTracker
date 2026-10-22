@@ -24,6 +24,8 @@ class RuleIn(BaseModel):
     set_entity_id: Optional[int] = None
     set_merchant: Optional[str] = None
     set_needs_review: bool = False
+    set_counterparty_account_id: Optional[int] = None
+    set_exclude_from_audit: bool = False
     apply_to_pending: bool = False
 
 
@@ -43,7 +45,8 @@ def _validate(body: RuleIn):
 def _out(r: ExpRule) -> dict:
     return {c: getattr(r, c) for c in (
         "id", "priority", "account_id", "field", "pattern", "amount_sign", "set_kind",
-        "set_category_id", "set_entity_id", "set_merchant", "set_needs_review", "active", "origin")}
+        "set_category_id", "set_entity_id", "set_merchant", "set_needs_review", "set_counterparty_account_id",
+        "set_exclude_from_audit", "active", "origin")}
 
 
 @router.get("")
@@ -70,6 +73,7 @@ def create_rule(body: RuleIn, db: Session = Depends(get_exp_db)):
 
 
 @router.post("/reapply")
-def reapply_rules(db: Session = Depends(get_exp_db)):
-    """Pasa las filas pendientes por las reglas vigentes (útil después de editar o recargar reglas)."""
-    return rules_svc.reclassify_pending(db)
+def reapply_rules(include_rule_rows: bool = False, db: Session = Depends(get_exp_db)):
+    """Pasa las filas pendientes por las reglas vigentes (útil después de editar o recargar reglas).
+    include_rule_rows=true re-evalúa también las ya clasificadas por una regla (nunca las manuales)."""
+    return rules_svc.reclassify_pending(db, include_rule_rows)

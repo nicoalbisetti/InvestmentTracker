@@ -21,5 +21,7 @@ class ExpAccount(ExpBase):
     paid_from_account_id = Column(Integer, ForeignKey("exp_accounts.id"), nullable=True)
     default_entity_id = Column(Integer, ForeignKey("exp_entities.id"), nullable=True)
     has_statements = Column(Boolean, nullable=False, default=True)
+    # El extracto detalla aportes/rescates por inversión (la auditoría sólo cruza esas custodias)
+    itemizes_investments = Column(Boolean, nullable=False, default=False)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)

@@ -5,6 +5,7 @@ import {
   rebuildLinks, rejectLink, ReviewQueue,
 } from '../../api/expenses';
 import MerchantGroups from './MerchantGroups';
+import UnpairedGroups from './UnpairedGroups';
 import { fmtDate } from '../../utils/formatters';
 import { fmtMoney } from '../../utils/expenses';
 
@@ -91,6 +92,11 @@ export default function ReviewTab() {
             </tr>))}
         </tbody></table>
       </Section>
+
+      <details className="card p-0">
+        <summary className="px-4 py-3 cursor-pointer text-sm font-semibold">Transferencias propias: asignar la cuenta de la otra punta</summary>
+        <div className="px-4 pb-4"><UnpairedGroups onChanged={load} /></div>
+      </details>
 
       <Section title="Transferencias propias sin par" count={q.unpaired_transfers.length} hint="hay otra cuenta importada que cubre la fecha">
         <ItemsTable items={q.unpaired_transfers} />

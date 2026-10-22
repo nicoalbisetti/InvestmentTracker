@@ -14,7 +14,7 @@ _n = [0]
 
 def bank(db, d, amount, kind, desc="movimiento", **kw):
     if not db.query(ExpAccount).count():
-        db.add(ExpAccount(name="Banco", institution="XP", country="BR", kind="bank", currency="BRL")); db.commit()
+        db.add(ExpAccount(name="Banco", institution="XP", country="BR", kind="bank", currency="BRL", itemizes_investments=True)); db.commit()
     _n[0] += 1
     t = ExpTransaction(account_id=1, date=d, description_raw=desc, amount=amount, currency="BRL", amount_brl=amount,
                        amount_usd=amount / 5, kind=kind, dedup_hash=f"i{_n[0]}", **kw)

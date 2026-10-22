@@ -28,6 +28,8 @@ class Classification:
     classification_source: str = "default"
     rule_id: Optional[int] = None
     needs_review: bool = False
+    counterparty_account_id: Optional[int] = None
+    exclude_from_audit: bool = False
 
 
 class Classifier:
@@ -57,22 +59,38 @@ class Classifier:
             return self._finish(Classification("own_transfer", merchant_normalized=merchant,
                                                classification_source="own_account"), amount)
 
+        winner = None
         for r in self.rules:
-            if r.account_id not in (None, account_id):
-                continue
-            if (r.amount_sign == "positive" and not positive) or (r.amount_sign == "negative" and positive):
-                continue
-            if self._compiled[r.id].search(fields.get(r.field, "")):
-                kind = _sign_adjust(r.set_kind, amount)
-                return self._finish(Classification(
-                    kind, r.set_category_id, r.set_entity_id, r.set_merchant or merchant,
-                    "rule", r.id, bool(r.set_needs_review)), amount)
+            if self._matches(r, account_id, positive, fields):
+                winner = r
+                break
+        if winner is not None:
+            r = winner
+            c = Classification(_sign_adjust(r.set_kind, amount), r.set_category_id, r.set_entity_id, r.set_merchant or merchant,
+                               "rule", r.id, bool(r.set_needs_review), r.set_counterparty_account_id, bool(r.set_exclude_from_audit))
+            # la cuenta de contraparte y la exclusión de auditoría pueden venir de otra regla del mismo tipo que también matchee
+            if c.counterparty_account_id is None or not c.exclude_from_audit:
+                for o in self.rules:
+                    if o is r or o.set_kind != r.set_kind or not self._matches(o, account_id, positive, fields):
+                        continue
+                    if c.counterparty_account_id is None and o.set_counterparty_account_id:
+                        c.counterparty_account_id = o.set_counterparty_account_id
+                    if not c.exclude_from_audit and o.set_exclude_from_audit:
+                        c.exclude_from_audit = True
+            return self._finish(c, amount)
 
         if kind_hint:
             return self._finish(Classification(kind_hint, merchant_normalized=merchant,
                                                classification_source="default"), amount)
         return Classification(
             "expense" if not positive else "income", self.unclassified_id, None, merchant, "default", None, True)
+
+    def _matches(self, r, account_id, positive, fields) -> bool:
+        if r.account_id not in (None, account_id):
+            return False
+        if (r.amount_sign == "positive" and not positive) or (r.amount_sign == "negative" and positive):
+            return False
+        return bool(self._compiled[r.id].search(fields.get(r.field, "")))
 
     def _is_own(self, description, counterparty) -> bool:
         hay = strip_accents(f"{description} {counterparty or ''}").lower()

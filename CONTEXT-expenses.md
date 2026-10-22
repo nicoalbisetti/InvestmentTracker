@@ -37,11 +37,11 @@ cuentas y con Inversiones/Proventos, y muestra gasto por categoría, mes y entid
 | Tabla | Campos clave |
 |---|---|
 | `exp_entities` | `code` (personal \| bertioga \| pj), `name`, `active` |
-| `exp_accounts` | `name`, `institution`, `country` (AR\|BR), `kind` (bank\|wallet\|credit_card), `currency`, `parser_key`, `owner_identifiers` (JSON), `paid_from_account_id`, `default_entity_id`, `has_statements`, `active` |
+| `exp_accounts` | `name`, `institution`, `country` (AR\|BR), `kind` (bank\|wallet\|credit_card), `currency`, `parser_key`, `owner_identifiers` (JSON), `paid_from_account_id`, `default_entity_id`, `has_statements`, `itemizes_investments` (el extracto detalla aportes/rescates por inversión; la auditoría sólo cruza esas custodias), `active` |
 | `exp_import_batches` | `account_id`, `file_label`, `file_hash` (UNIQUE con `account_id`), `parser_key`, `period_start/end`, `statement_due_date`, `statement_period` (YYYY-MM), `statement_totals` (JSON por moneda), `validation` (JSON de checks), `preview_rows` (JSON mientras `status=preview`), `status` (preview\|confirmed\|discarded) |
 | `exp_categories` | `name` (UNIQUE), `is_system`. Sistema: "Tarjeta sin detalle", "Sin clasificar" |
-| `exp_transactions` | `account_id`, `batch_id`, `date` (imputación), `purchase_date`, `statement_period`, `description_raw`, `counterparty`, `merchant_normalized`, `external_id`, `amount` (con signo), `currency`, `fx_usd_brl`, `fx_ars_usd`, `fx_estimated`, `amount_brl`, `amount_usd`, `kind`, `category_id`, `entity_id`, `installment_number/total`, `classification_source` (own_account\|rule\|manual\|default), `rule_id`, `needs_review`, `transfer_group_id`, `statement_batch_id`, `dedup_hash` (UNIQUE) |
-| `exp_rules` | `priority`, `account_id`, `field`, `pattern` (regex i), `amount_sign`, `set_kind`, `set_category_id`, `set_entity_id`, `set_needs_review` (clasifica pero deja la fila en revisión), `origin` (seed\|manual), `seed_key` |
+| `exp_transactions` | `account_id`, `batch_id`, `date` (imputación), `purchase_date`, `statement_period`, `description_raw`, `counterparty`, `merchant_normalized`, `external_id`, `amount` (con signo), `currency`, `fx_usd_brl`, `fx_ars_usd`, `fx_estimated`, `amount_brl`, `amount_usd`, `kind`, `category_id`, `entity_id`, `installment_number/total`, `classification_source` (own_account\|rule\|manual\|default), `rule_id`, `needs_review`, `transfer_group_id`, `statement_batch_id`, `counterparty_account_id` (cuenta propia de la otra punta, aunque no se importe), `exclude_from_audit` (aporte que no se rastrea en Inversiones, p. ej. cripto), `dedup_hash` (UNIQUE) |
+| `exp_rules` | `priority`, `account_id`, `field`, `pattern` (regex i), `amount_sign`, `set_kind`, `set_category_id`, `set_entity_id`, `set_needs_review` (clasifica pero deja la fila en revisión), `set_counterparty_account_id`, `set_exclude_from_audit`, `origin` (seed\|manual), `seed_key` |
 | `exp_links` | Vínculos **hacia Inversiones**: `exp_transaction_id`, `target_type` (investment_transaction\|provento_item), `target_id`, `link_type`, `amount_allocated_brl`, `status` (suggested\|confirmed\|rejected), `score`, y snapshot `target_date/target_amount/target_label` |
 | `exp_fx_rates` | PK `(date, pair)`: `USDBRL_PTAX`, `USDARS_MEP`; `rate`, `source` (ptax\|argentinadatos\|manual) |
 
@@ -95,7 +95,7 @@ reclasifica sólo las filas `needs_review` no manuales que matchean (`POST /rule
 
 ## 7. Conciliación (`services/linking.py`)
 
-- **Pares** (`own_transfer`, `card_payment`): otra cuenta, mismo importe/moneda, signo opuesto; auto-confirma lo
+- **Pares** (`own_transfer`, `card_payment`): otra cuenta (si una fila declara `counterparty_account_id`, sólo esa), mismo importe/moneda, signo opuesto; auto-confirma lo
   inequívoco (≤ 1 día en transferencias; 45 días en tarjetas). Ambiguos → sugerencias en la cola.
 - **Adopción**: una transferencia propia sin par adopta a su contraparte exacta no reconocida (±1 día, única, no manual).
 - **Tarjetas por cobertura**: un pago de la cuenta pagadora dentro de la ventana de vencimiento de una fatura
@@ -107,8 +107,8 @@ reclasifica sólo las filas `needs_review` no manuales que matchean (`POST /rule
   (±30 días; exacto 0,5 %; FGC hasta 6 % y sólo instrumentos `in_liquidation`; 1 movimiento = hasta 3 transacciones);
   una transferencia propia entrante sin par puede ser la contraparte exacta de un rescate. Cobro ↔ `ProvéntoItem`
   (1→N y N→1, sin filtrar por custodia). Confirmar descarta alternativas; un rechazo no se vuelve a sugerir.
-- **Auditoría** (`audit_investments`, sólo lectura): movimientos sin Transaction, Transactions de custodias importadas
-  sin movimiento bancario, diferencias en vínculos confirmados, vínculos cuyo destino cambió.
+- **Auditoría** (`audit_investments`, sólo lectura): movimientos sin Transaction (salvo `exclude_from_audit`), Transactions de
+  custodias cuyo extracto **detalla inversiones** (`itemizes_investments`) sin movimiento bancario, diferencias en vínculos confirmados, vínculos cuyo destino cambió.
 
 ## 8. Resumen (`services/summary.py`)
 
@@ -143,7 +143,8 @@ PTAX venta (BCB Olinda; sólo días hábiles → día anterior) y MEP venta (arg
 | POST | `/links/{id}/confirm`, `/links/{id}/reject` | |
 | GET | `/audit/investments?from&to` | Auditoría de sólo lectura |
 | GET/POST | `/rules`, `/rules/preview` | Reglas; vista previa de impacto; alta con `apply_to_pending` |
-| POST | `/rules/reapply` | Pasa los pendientes (no manuales) por las reglas vigentes |
+| POST | `/rules/reapply?include_rule_rows=` | Pasa los pendientes (no manuales) por las reglas vigentes; con `include_rule_rows=true` re-evalúa también las ya clasificadas por una regla |
+| GET/POST | `/review/unpaired-groups`, `/review/unpaired-groups/apply` | Transferencias propias sin par agrupadas por descripción; asigna la cuenta de contraparte (regla + filas) y reintenta el pareo |
 | GET | `/review/merchant-groups` | Pendientes agrupados por comercio y signo, de mayor a menor monto |
 | POST | `/review/merchant-groups/apply` | `{items:[{key, sign, kind, category_id?, entity_id?}]}`: una regla anclada por comercio, aplicada a sus filas pendientes |
 | GET/POST | `/categories`; GET `/entities` | |
@@ -178,11 +179,15 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
 
 ## 13. Pendientes y límites conocidos
 
-- Compras de cripto (Brasil Bitcoin, Mercado Bitcoin, Alpha Trading) no existen como `Transaction` en Inversiones: la
-  auditoría las lista como "sin transacción" (43 aportes).
-- Transferencias propias hacia cuentas no importadas (Santander BR, Bradesco, cuenta de inversión) quedan como "sin par";
-  no hay forma de indicar la cuenta de destino (idea: `counterparty_account_id` por regla).
+- Transferencias propias hacia cuentas no importadas: se asigna la cuenta de la otra punta desde Revisar (o en Movimientos);
+  las que van a una cuenta sin extractos dejan de ser sospechosas. Quedan por asignar las que van a otros bancos propios
+  (Santander BR, Bradesco, Inter alterno): la descripción no dice a cuál, requiere tu criterio.
+- Las compras de cripto (Brasil Bitcoin, Mercado Bitcoin, Alpha Trading) están marcadas `exclude_from_audit` por la regla
+  `br_crypto_untracked`: no aparecen en la auditoría ni en "aportes sin vincular". No existen como `Transaction`.
+- La auditoría cruza sólo las custodias de cuentas con `itemizes_investments` (hoy Inter). XP no detalla (aportes por la
+  "conta investimento").
 - Sección de dólares de la cuenta Santander AR y AMEX con USD sólo cubiertas por PDF sintéticos (los extractos reales
   no traen movimientos en esos casos).
+- Sin clasificar: transferencias a personas (AR) en su mayoría; se resuelven con tu criterio en Revisar.
 - No implementado de la spec: `installments/upcoming`, combobox con búsqueda, edición de reglas/TC en la UI, drag de
-  prioridad de reglas. v2 (proyecciones, anomalías, cruces con inversiones) fuera de alcance.
+  prioridad de reglas. v2 (proyecciones, anomalías, cruces con Inversiones) fuera de alcance.

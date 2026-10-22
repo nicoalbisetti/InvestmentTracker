@@ -6,7 +6,7 @@ type Body = Record<string, unknown>;
 export interface ExpAccount {
   id: number; name: string; institution: string; country: 'AR' | 'BR'; kind: 'bank' | 'wallet' | 'credit_card';
   currency: string; parser_key: string | null; paid_from_account_id: number | null;
-  default_entity_id: number | null; has_statements: boolean; active: boolean; owner_identifiers?: string[];
+  default_entity_id: number | null; has_statements: boolean; itemizes_investments: boolean; active: boolean; owner_identifiers?: string[];
 }
 export interface ExpCategory { id: number; name: string; is_system: boolean; active: boolean }
 export interface ExpEntity { id: number; code: string; name: string; active: boolean }
@@ -17,6 +17,7 @@ export interface ExpTx {
   category: string | null; entity_id: number | null; entity: string | null; installment_number: number | null;
   installment_total: number | null; classification_source: string; needs_review: boolean; notes: string | null;
   paired: boolean; statement_batch_id: number | null; fx_estimated: boolean;
+  counterparty_account_id: number | null; exclude_from_audit: boolean;
 }
 export interface SummaryMonth {
   month: string; expenses: number; income: number; proventos: number; savings: number; no_detail: number;
@@ -114,3 +115,13 @@ export const applyMerchantGroups = (items: GroupRuleInput[]): Promise<{ key: str
   client.post(`${B}/review/merchant-groups/apply`, { items }).then(r => r.data);
 export const reapplyRules = (): Promise<{ reclassified: number; resolved: number }> =>
   client.post(`${B}/rules/reapply`).then(r => r.data);
+
+export interface UnpairedGroup {
+  key: string; sign: 'positive' | 'negative'; merchant: string; count: number; total_brl: number;
+  first: string; last: string; accounts: number[]; sample: string[];
+}
+export const getUnpairedGroups = (limit = 100): Promise<UnpairedGroup[]> =>
+  client.get(`${B}/review/unpaired-groups`, { params: { limit } }).then(r => r.data);
+export const applyUnpairedGroups = (items: { key: string; sign: string; account_id: number }[]):
+  Promise<{ key: string; rule_id: number; assigned: number }[]> =>
+  client.post(`${B}/review/unpaired-groups/apply`, { items }).then(r => r.data);
