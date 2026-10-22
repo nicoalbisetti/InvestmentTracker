@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 19 Oct 2026 (actualizado: proventos pagados/previstos se cargan en la moneda del instrumento; precio medio editable a mano en Posiciones; recálculo de avg_price desde operaciones desactivado).
+> Refleja el estado REAL del código al 22 Oct 2026 (actualizado: módulo de Gastos — ver `CONTEXT-expenses.md`; proventos pagados/previstos se cargan en la moneda del instrumento; precio medio editable a mano en Posiciones; recálculo de avg_price desde operaciones desactivado).
 
 ---
 
@@ -62,6 +62,11 @@ npm run dev
 ---
 
 ## 3. Estructura de Carpetas
+
+> **Módulo de Gastos:** paquete independiente `backend/app/expenses/` (base SQLite propia `expenses.db` / `expenses_demo.db`,
+> tablas `exp_*`), frontend en `frontend/src/{pages,components}/expenses/`, `api/expenses.ts`, `utils/expenses.ts` y tests en
+> `backend/tests/`. Detalle completo en **`CONTEXT-expenses.md`**. Sólo `main.py` (registro de router y creación de tablas),
+> `App.tsx` y `Sidebar.tsx` tocan código de Inversiones; ningún módulo de Inversiones importa `expenses`.
 
 ```
 InvestmentTracker/
@@ -534,6 +539,9 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/api/simulation` | Proyección determinística del portfolio. Query params: `horizon_months` (int 1-120, default 60), `monthly_contribution_brl` (float, default 0), `rate_renta_fija/accion/fii/fundo/internacional` (float anual, defaults 0.13/0.12/0.10/0.11/0.10). Clasifica por tipo e custodian (XP_INTERNATIONAL/XP_INTERNACIONAL → internacional). Proporciones fijas desde snapshot inicial. Response: `{snapshot_date, initial_total_brl, data: [{month, date, total, renta_fija, accion, fii, fundo, internacional}]}` |
 
+### `/api/expenses` (módulo de Gastos)
+Detalle de todos los endpoints en `CONTEXT-expenses.md` §10. Resumen: `accounts`, `imports` (preview/confirm/delete, 409 si el archivo ya se importó), `transactions` (filtros, PATCH, bulk, crear regla), `summary`, `review-queue`, `coverage`, `links/*` (pares, vínculos con Inversiones: sugerir/confirmar/rechazar), `audit/investments` (sólo lectura), `rules`, `categories`, `entities`, `fx/*`, `demo/regenerate`. Usa la base de gastos según `X-Env`; sólo `links`/`audit` leen (nunca escriben) la base de Inversiones.
+
 ### Otros
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -632,6 +640,9 @@ Proyección determinística del portfolio a futuro. Layout dos columnas (md+): p
 **Gráfico:** `ComposedChart` de Recharts con 5 `Area` apiladas + `Line` discontinua para total. Tooltip muestra todas las clases + total. Eje X cada 12 meses, eje Y abreviado (R$ 1.2M / R$ 850k).
 **KPI Cards:** Valor final, Total aportado, Ganancia estimada (verde/rojo), CAGR implícito. Skeleton mientras carga.
 **API:** `GET /api/simulation`
+
+### Gastos (`/gastos`)
+Módulo de gastos con pestañas por `?tab=`: **Resumen** (KPIs, barras apiladas categoría × mes, tabla, filtros entidad/país/moneda, cobertura de extractos), **Movimientos** (filtros, edición inline, edición masiva, crear regla), **Revisar** (cola por motivo, pares, vínculos con Inversiones y auditoría), **Importar** (wizard con checks de validación) y **Configuración** (cuentas). Ítem "Gastos" en el Sidebar. **API:** `/api/expenses/*`. Detalle en `CONTEXT-expenses.md` §11.
 
 ---
 
@@ -785,6 +796,7 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Operaciones USD: precio en USD, cotización mensual auto-detectada desde tabla quotes (con override manual), amount_brl = qty × price_usd × rate, avg_price en USD, display dual USD/BRL en formulario y card resumen
 
 ---
+- [x] Módulo de Gastos: importación de extractos AR/BR (6 parsers CSV/PDF con validación de saldos), clasificación por reglas, conciliación (transferencias propias, pagos de tarjeta, aportes/rescates y proventos de Inversiones), resumen por categoría/mes/entidad, auditoría de inversiones — ver `CONTEXT-expenses.md`
 
 ## 10. Features Pendientes
 

@@ -125,4 +125,4 @@ def test_overrides_are_manual_and_survive(client, db, inter):
 def test_file_name_not_persisted(client, db, card):
     upload(client, CARD, name="Fatura2026-03-20_00000000000000000000.csv")
     b = db.query(ExpImportBatch).one()
-    assert "0072" not in (b.file_label or "")
+    assert "0000000000" not in (b.file_label or "")

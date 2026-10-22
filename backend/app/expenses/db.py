@@ -27,8 +27,9 @@ def get_exp_db(request: Request):
         db.close()
 
 
-def create_expense_tables(engines=None):
-    """create_all + seeds idempotentes en la base real y en la demo."""
+def create_expense_tables(engines=None, with_demo=True):
+    """create_all + seeds idempotentes en la base real y en la demo. La demo se llena con datos ficticios
+    la primera vez (si no tiene cuentas)."""
     from app.expenses import models  # noqa: F401  (registra tablas)
     from app.expenses.migrations import run_migrations
     from app.expenses.seed.base import seed_base_data
@@ -40,3 +41,8 @@ def create_expense_tables(engines=None):
         with sessionmaker(bind=eng)() as db:
             seed_base_data(db)
             load_seed_rules(db)
+            if with_demo and eng is exp_demo_engine:
+                from app.expenses.models import ExpAccount
+                if db.query(ExpAccount).count() == 0:
+                    from app.expenses.seed.demo import seed_demo
+                    seed_demo(db)
