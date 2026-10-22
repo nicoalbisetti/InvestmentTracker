@@ -113,7 +113,7 @@ reclasifica sólo las filas `needs_review` no manuales que matchean (`POST /rule
 ## 8. Resumen (`services/summary.py`)
 
 Fuente única de verdad (`bucket`): **gasto** = `expense` + `refund` (netea) + pagos de tarjeta sin fatura cubierta;
-**ingreso** = `income`; **provento** aparte; todo lo demás excluido. Filtros: meses, entidad (la de la fila o la
+**ingreso** = `income` clasificado (las entradas sin clasificar —default + revisión— van aparte en `income_pending`, no suman); **provento** aparte; todo lo demás excluido. Filtros: meses, entidad (la de la fila o la
 default de la cuenta), país, moneda (BRL \| USD \| native). Devuelve por mes: gasto, ingreso, proventos, ahorro,
 por categoría y por entidad, `no_detail`, % pendiente de revisar y **cobertura** de extractos por cuenta y mes.
 
@@ -182,8 +182,12 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
 - Transferencias propias hacia cuentas no importadas: se asigna la cuenta de la otra punta desde Revisar (o en Movimientos);
   las que van a una cuenta sin extractos dejan de ser sospechosas. Quedan por asignar las que van a otros bancos propios
   (Santander BR, Bradesco, Inter alterno): la descripción no dice a cuál, requiere tu criterio.
-- Las compras de cripto (Brasil Bitcoin, Mercado Bitcoin, Alpha Trading) están marcadas `exclude_from_audit` por la regla
-  `br_crypto_untracked`: no aparecen en la auditoría ni en "aportes sin vincular". No existen como `Transaction`.
+- Las cripto (Brasil Bitcoin, Mercado Bitcoin, Alpha Trading) se usan sólo para mandar plata de Brasil a Argentina: la regla
+  `br_crypto_transfer` las clasifica como `fx_conversion` (ni gasto ni aporte a inversiones). El lado argentino (las entradas
+  de personas/exchanges en Santander AR y Mercado Pago) no se puede reconocer solo: quedan sin clasificar y se marcan "Cambio de
+  moneda" desde Revisar. Mientras estén sin clasificar **no suman a ingresos** (`income_pending` en el resumen).
+- Las "conta investimento" de XP son dos cuentas; se modelan como una sola contraparte ("XP inversión (2 cuentas)", sin
+  extractos) porque las descripciones no dicen a cuál va cada transferencia.
 - La auditoría cruza sólo las custodias de cuentas con `itemizes_investments` (hoy Inter). XP no detalla (aportes por la
   "conta investimento").
 - Sección de dólares de la cuenta Santander AR y AMEX con USD sólo cubiertas por PDF sintéticos (los extractos reales

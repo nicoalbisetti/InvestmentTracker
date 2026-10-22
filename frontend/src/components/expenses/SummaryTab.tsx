@@ -88,7 +88,7 @@ export default function SummaryTab() {
         <KpiCard loading={loading} title={`Gasto ${last ? monthLabel(last.month) : ''}`} value={money(last?.expenses)}
           subtitle={partial ? 'último mes con todos los extractos' : undefined} />
         <KpiCard loading={loading} title="Promedio 6 meses" value={money(avg6)} />
-        <KpiCard loading={loading} title="Ingresos" value={money(last?.income)} subtitle={last && last.proventos ? `+ proventos ${money(last.proventos)}` : undefined} />
+        <KpiCard loading={loading} title="Ingresos" value={money(last?.income)} subtitle={[last?.proventos ? `+ proventos ${money(last.proventos)}` : '', last?.income_pending ? `${money(last.income_pending)} de entradas sin clasificar (no incluidas)` : ''].filter(Boolean).join(' · ') || undefined} />
         <KpiCard loading={loading} title="Ahorro" value={money(last?.savings)} />
         <KpiCard loading={loading} title="Pendiente de revisar" value={`${data?.pending_review_pct ?? 0}%`} subtitle="de los movimientos" />
       </div>

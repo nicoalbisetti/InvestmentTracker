@@ -131,10 +131,11 @@ def test_reapply_including_rule_rows_flags_existing_rows(db):
     assert t.exclude_from_audit and not manual.exclude_from_audit
 
 
-def test_seed_crypto_rule_is_excluded_from_audit(db):
+def test_seed_crypto_rule_is_a_cross_border_transfer_not_an_investment(db):
+    """Las cripto se usan sólo para mandar plata de Brasil a Argentina: ni gasto ni aporte a inversiones."""
     a = acct(db, "A")
     c = Classifier(db).classify(a.id, "Pix enviado para Brasil Bitcoin Servicos Digitais", None, Decimal("-1000"))
-    assert c.kind == "investment_contribution" and c.exclude_from_audit and not c.needs_review
+    assert c.kind == "fx_conversion" and not c.needs_review and not c.exclude_from_audit
     d = Classifier(db).classify(a.id, "Debito Online Td: Prot IPCA+ 2032", None, Decimal("-1000"))
     assert d.kind == "investment_contribution" and not d.exclude_from_audit
 

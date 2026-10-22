@@ -174,7 +174,7 @@ def test_every_transaction_falls_in_exactly_one_bucket(db, cards):
     for t in db.query(ExpTransaction):
         kinds_by_bucket.setdefault(S.bucket(t, "bank"), []).append(t.kind)
     assert sum(len(v) for v in kinds_by_bucket.values()) == len(KINDS)
-    assert set(kinds_by_bucket) <= {"expense", "income", "provento", "excluded"}
+    assert set(kinds_by_bucket) <= {"expense", "income", "income_pending", "provento", "excluded"}
 
 
 def test_summary_filters_and_native_currency(db):
@@ -318,3 +318,14 @@ def test_ar_statement_totals_per_currency_and_pair_makes_link_exact(db):
     linking.rebuild(db)
     assert p.statement_batch_id == b.id and p.transfer_group_id == c.transfer_group_id is not None
     assert linking.is_exact_statement_link(db, p)  # débito = pesos + USD x TC: se prueba por el par
+
+
+def test_unclassified_inflows_do_not_inflate_income(db):
+    a = acct(db, "A")
+    tx(db, a, D(2026, 1, 5), 1000, "income")                                              # clasificado
+    pend = tx(db, a, D(2026, 1, 6), 5000, "income", needs_review=True)                    # default + revisión
+    s = S.summary(db)["months"][0]
+    assert s["income"] == 1000 and s["income_pending"] == 5000 and s["savings"] == 1000
+    pend.classification_source, pend.needs_review = "manual", False; db.commit()
+    s = S.summary(db)["months"][0]
+    assert s["income"] == 6000 and s["income_pending"] == 0

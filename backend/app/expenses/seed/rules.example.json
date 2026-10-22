@@ -550,12 +550,11 @@
   "category": "Salud y farmacia"
  },
  {
-  "seed_key": "br_crypto_untracked",
+  "seed_key": "br_crypto_transfer",
   "priority": 79,
   "field": "description_raw",
   "pattern": "Bitcoin|Alpha Trading",
   "amount_sign": "any",
-  "kind": "investment_contribution",
-  "exclude_from_audit": true
+  "kind": "fx_conversion"
  }
 ]

@@ -2,7 +2,8 @@
 
 Cada movimiento cae en exactamente un balde (ver `bucket`):
   expense   : expense, refund (netea) y pagos de tarjeta SIN fatura cubierta ('Tarjeta sin detalle')
-  income    : income
+  income    : income (clasificado)
+  income_pending : entrada sin clasificar (default + revisión): NO suma a ingresos hasta que se clasifique, se informa aparte
   provento  : provento
   excluded  : own_transfer, card_payment cubierto/interno, investment_*, fx_conversion, unknown
 """
@@ -24,7 +25,7 @@ def bucket(tx: ExpTransaction, account_kind: str) -> str:
     if k in ("expense", "refund"):
         return "expense"
     if k == "income":
-        return "income"
+        return "income_pending" if (tx.needs_review and tx.classification_source == "default") else "income"
     if k == "provento":
         return "provento"
     if k == "card_payment" and account_kind != "credit_card" and tx.statement_batch_id is None and tx.amount < 0:
@@ -92,7 +93,7 @@ def summary(db: Session, month_from: Optional[str] = None, month_to: Optional[st
 
     def build(cur: Optional[str]) -> dict:
         months: dict[str, dict] = defaultdict(lambda: {
-            "expenses": 0.0, "income": 0.0, "proventos": 0.0, "by_category": defaultdict(float),
+            "expenses": 0.0, "income": 0.0, "income_pending": 0.0, "proventos": 0.0, "by_category": defaultdict(float),
             "by_entity": defaultdict(float), "no_detail": 0.0})
         missing_fx = 0
         for t, acc, code in rows:
@@ -115,6 +116,8 @@ def summary(db: Session, month_from: Optional[str] = None, month_to: Optional[st
                     m["no_detail"] += -v
             elif b == "income":
                 m["income"] += v
+            elif b == "income_pending":
+                m["income_pending"] += v
             else:
                 m["proventos"] += v
         out = []
@@ -122,7 +125,7 @@ def summary(db: Session, month_from: Optional[str] = None, month_to: Optional[st
             m = months[ym]
             out.append({
                 "month": ym, "expenses": round(m["expenses"], 2), "income": round(m["income"], 2),
-                "proventos": round(m["proventos"], 2), "savings": round(m["income"] - m["expenses"], 2),
+                "income_pending": round(m["income_pending"], 2), "proventos": round(m["proventos"], 2), "savings": round(m["income"] - m["expenses"], 2),
                 "no_detail": round(m["no_detail"], 2),
                 "by_category": {k: round(v, 2) for k, v in sorted(m["by_category"].items())},
                 "by_entity": {k: round(v, 2) for k, v in sorted(m["by_entity"].items())},

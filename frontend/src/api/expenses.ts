@@ -20,7 +20,7 @@ export interface ExpTx {
   counterparty_account_id: number | null; exclude_from_audit: boolean;
 }
 export interface SummaryMonth {
-  month: string; expenses: number; income: number; proventos: number; savings: number; no_detail: number;
+  month: string; expenses: number; income: number; income_pending: number; proventos: number; savings: number; no_detail: number;
   by_category: Record<string, number>; by_entity: Record<string, number>;
 }
 export interface SummaryBlock { months: SummaryMonth[]; rows_without_fx: number }
