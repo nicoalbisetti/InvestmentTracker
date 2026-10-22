@@ -8,6 +8,7 @@ from datetime import date
 from app.database import get_db
 from app.models.instrument import Instrument
 from app.models.provento_forecast import ProventoForecast
+from app.services.provento_currency import get_month_usd_rate, to_brl
 
 router = APIRouter(prefix="/api/proventos/forecast", tags=["provento_forecast"])
 
@@ -40,6 +41,20 @@ def get_forecast(
         .all()
     )
     forecast_map: dict[tuple, float] = {(r.instrument_id, r.month): r.amount for r in rows}
+    usd_ids = {i.id for i in instruments if i.currency == "USD"}
+    native_map: dict[tuple, float] = {}
+    rate_cache: dict[int, Optional[float]] = {}
+    for r in rows:
+        if r.instrument_id not in usd_ids:
+            continue
+        native = r.amount_native
+        if native is None:
+            if r.month not in rate_cache:
+                rate_cache[r.month] = get_month_usd_rate(db, target_year, r.month)
+            if rate_cache[r.month]:
+                native = r.amount / rate_cache[r.month]
+        if native is not None:
+            native_map[(r.instrument_id, r.month)] = round(native, 2)
 
     items = []
     for inst in instruments:
@@ -51,7 +66,9 @@ def get_forecast(
             "type": inst.type,
             "location": inst.location,
             "custodian": inst.custodian,
+            "currency": inst.currency or "BRL",
             "months": months,
+            "months_native": {m: native_map[(inst.id, m)] for m in MONTHS if (inst.id, m) in native_map},
             "total": total,
         })
 
@@ -82,9 +99,14 @@ def upsert_forecast(
     payload: dict,
     db: Session = Depends(get_db),
 ):
-    """Upsert a forecast cell. Pass amount=null or amount=0 to delete."""
+    """Upsert a forecast cell. Pass amount=null or amount=0 to delete.
+    `amount` está en la moneda del instrumento; para USD se convierte a BRL con la
+    cotización del mes y se guarda también el monto nativo."""
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Mes inválido")
+    inst = db.query(Instrument).filter_by(id=instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
 
     amount = payload.get("amount")
 
@@ -100,12 +122,24 @@ def upsert_forecast(
             db.commit()
         return {"deleted": True}
 
+    try:
+        amount_brl, amount_native, _ = to_brl(db, amount, inst.currency, year, month)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
     if existing:
-        existing.amount = float(amount)
+        existing.amount = amount_brl
+        existing.amount_native = amount_native
     else:
-        db.add(ProventoForecast(instrument_id=instrument_id, year=year, month=month, amount=float(amount)))
+        db.add(ProventoForecast(
+            instrument_id=instrument_id, year=year, month=month,
+            amount=amount_brl, amount_native=amount_native,
+        ))
     db.commit()
-    return {"instrument_id": instrument_id, "year": year, "month": month, "amount": float(amount)}
+    return {
+        "instrument_id": instrument_id, "year": year, "month": month,
+        "amount": float(amount), "amount_brl": amount_brl, "amount_native": amount_native,
+    }
 
 
 # ─── Month name mapping (ES + PT variants) ────────────────────────────────────

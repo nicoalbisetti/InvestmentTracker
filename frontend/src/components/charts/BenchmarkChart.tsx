@@ -7,12 +7,14 @@ interface BenchmarkSeries {
   portfolio?: number | null;
   cdi?: number | null;
   ipca?: number | null;
+  usd?: number | null;
 }
 
 interface Props {
   data: BenchmarkSeries[];
   showCdi: boolean;
   showIpca: boolean;
+  showUsd?: boolean;
   height?: number;
 }
 
@@ -21,7 +23,7 @@ function fmtPctReturn(v: number) {
   return `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`;
 }
 
-export default function BenchmarkChart({ data, showCdi, showIpca, height = 260 }: Props) {
+export default function BenchmarkChart({ data, showCdi, showIpca, showUsd = false, height = 260 }: Props) {
   return (
     <ResponsiveContainer width="100%" height={height}>
       <LineChart data={data} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -38,7 +40,7 @@ export default function BenchmarkChart({ data, showCdi, showIpca, height = 260 }
           width={60}
         />
         <Tooltip
-          formatter={(val: any, name: string) => [fmtPctReturn(val), name]}
+          formatter={(val: any, name: any) => [fmtPctReturn(val), name]}
           labelFormatter={label => { const [y, m] = label.split('-'); return `${m}/${y}`; }}
           contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
         />
@@ -70,6 +72,18 @@ export default function BenchmarkChart({ data, showCdi, showIpca, height = 260 }
             dataKey="ipca"
             name="IPCA"
             stroke="#f59e0b"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 4 }}
+            strokeDasharray="4 2"
+          />
+        )}
+        {showUsd && (
+          <Line
+            type="monotone"
+            dataKey="usd"
+            name="Dólar"
+            stroke="#3b82f6"
             strokeWidth={2}
             dot={false}
             activeDot={{ r: 4 }}

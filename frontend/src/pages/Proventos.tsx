@@ -10,6 +10,9 @@ const MONTH_NAMES_ES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','O
 const MONTHS = [1,2,3,4,5,6,7,8,9,10,11,12];
 const TYPE_OPTIONS = Object.entries(INSTRUMENT_TYPE_LABELS).map(([v, l]) => ({ value: v, label: l }));
 
+const fmtUSDCell = (v: number) =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
 function fmtPosDate(d: string | null) {
   if (!d) return null;
   const [year, month] = d.split('-');
@@ -296,7 +299,15 @@ function PaidGrid() {
   const saveCell = async (instId: number, month: number, value: string) => {
     const num = value === '' ? null : parseFloat(value.replace(',', '.'));
     setEditing(null);
-    await client.patch(`/api/proventos/grid/${instId}/${year}/${month}`, { amount: num });
+    const isUsd = gridData?.items.find((r: any) => r.id === instId)?.currency === 'USD';
+    try {
+      await client.patch(`/api/proventos/grid/${instId}/${year}/${month}`, { amount: num });
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'No se pudo guardar el provento');
+      return;
+    }
+    // Instrumentos USD: el monto BRL lo calcula el backend con la cotización del mes
+    if (isUsd) { loadGrid(); return; }
     setGridData((prev: any) => {
       if (!prev) return prev;
       const items = prev.items.map((row: any) => {
@@ -411,6 +422,11 @@ function PaidGrid() {
                   const isEditing = editing?.instId === row.id && editing?.month === m;
                   const paid = row.months[m];
                   const forecast = row.forecast_months?.[m];
+                  const isUsd = row.currency === 'USD';
+                  const paidNative = row.months_native?.[m];
+                  const forecastNative = row.forecast_months_native?.[m];
+                  const fmtCell = (brl: number, native?: number) =>
+                    isUsd && native != null ? fmtUSDCell(native) : fmtBRL(brl);
                   return (
                     <td
                       key={m}
@@ -418,9 +434,9 @@ function PaidGrid() {
                       onClick={() => {
                         if (isEditing) return;
                         const initialValue = paid != null
-                          ? String(paid)
+                          ? String(isUsd && paidNative != null ? paidNative : paid)
                           : forecast != null
-                            ? String(forecast)
+                            ? String(isUsd && forecastNative != null ? forecastNative : forecast)
                             : '';
                         setEditing({ instId: row.id, month: m, value: initialValue });
                       }}
@@ -438,12 +454,18 @@ function PaidGrid() {
                           }}
                         />
                       ) : paid != null ? (
-                        <span className="text-xs font-mono group-hover:underline decoration-dotted text-emerald-600 dark:text-emerald-400">
-                          {fmtBRL(paid)}
+                        <span
+                          className="text-xs font-mono group-hover:underline decoration-dotted text-emerald-600 dark:text-emerald-400"
+                          title={isUsd ? fmtBRL(paid) : undefined}
+                        >
+                          {fmtCell(paid, paidNative)}
                         </span>
                       ) : forecast != null ? (
-                        <span className="text-xs font-mono group-hover:underline decoration-dotted text-amber-500 dark:text-amber-400 italic">
-                          {fmtBRL(forecast)}*
+                        <span
+                          className="text-xs font-mono group-hover:underline decoration-dotted text-amber-500 dark:text-amber-400 italic"
+                          title={isUsd ? fmtBRL(forecast) : undefined}
+                        >
+                          {fmtCell(forecast, forecastNative)}*
                         </span>
                       ) : (
                         <span className="text-xs font-mono text-gray-200 dark:text-gray-700">·</span>
@@ -488,7 +510,15 @@ function ForecastTable() {
   const saveCell = async (instId: number, month: number, value: string) => {
     const num = value === '' ? null : parseFloat(value.replace(',', '.'));
     setEditing(null);
-    await client.patch(`/api/proventos/forecast/${instId}/${year}/${month}`, { amount: num });
+    const isUsd = forecastData?.items.find((r: any) => r.id === instId)?.currency === 'USD';
+    try {
+      await client.patch(`/api/proventos/forecast/${instId}/${year}/${month}`, { amount: num });
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'No se pudo guardar la previsión');
+      return;
+    }
+    // Instrumentos USD: el monto BRL lo calcula el backend con la cotización del mes
+    if (isUsd) { loadForecast(); return; }
     // Update local state directly
     setForecastData((prev: any) => {
       if (!prev) return prev;
@@ -592,11 +622,14 @@ function ForecastTable() {
                 {MONTHS.map(m => {
                   const isEditing = editing?.instId === row.id && editing?.month === m;
                   const val = row.months[m];
+                  const isUsd = row.currency === 'USD';
+                  const nativeVal = row.months_native?.[m];
+                  const editVal = isUsd && nativeVal != null ? nativeVal : val;
                   return (
                     <td
                       key={m}
                       className="px-1 py-1 text-center cursor-pointer group"
-                      onClick={() => !isEditing && setEditing({ instId: row.id, month: m, value: val != null ? String(val) : '' })}
+                      onClick={() => !isEditing && setEditing({ instId: row.id, month: m, value: editVal != null ? String(editVal) : '' })}
                     >
                       {isEditing ? (
                         <input
@@ -611,8 +644,11 @@ function ForecastTable() {
                           }}
                         />
                       ) : (
-                        <span className={`text-xs font-mono group-hover:underline decoration-dotted ${val ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-200 dark:text-gray-700'}`}>
-                          {val ? fmtBRL(val) : '·'}
+                        <span
+                          className={`text-xs font-mono group-hover:underline decoration-dotted ${val ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-200 dark:text-gray-700'}`}
+                          title={isUsd && val ? fmtBRL(val) : undefined}
+                        >
+                          {val ? (isUsd && nativeVal != null ? fmtUSDCell(nativeVal) : fmtBRL(val)) : '·'}
                         </span>
                       )}
                     </td>
@@ -780,26 +816,65 @@ export default function Proventos() {
                         <td className="px-3 py-2.5 text-xs text-gray-500 uppercase sticky left-0 bg-slate-50 dark:bg-slate-800">Total</td>
                         <td />
                         <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-200">{fmtBRL(data.balance_total)}</td>
-                        {years.map(y => (
-                          <td key={y} className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                            {data.year_totals[y] ? fmtBRL(data.year_totals[y]) : '—'}
-                          </td>
-                        ))}
-                        <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400">
-                          {fmtBRL(Object.values(data.year_totals as Record<number, number>).reduce((s, v) => s + (v || 0), 0))}
-                        </td>
+                        {years.map(y => {
+                          const yieldPct = data.balance_total && data.year_totals[y]
+                            ? ((data.year_totals[y] / data.balance_total) * 100).toFixed(2) + '%'
+                            : null;
+                          return (
+                            <td key={y} className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400"
+                              title={yieldPct ? `Yield ${y}: ${yieldPct}` : undefined}>
+                              {data.year_totals[y] ? fmtBRL(data.year_totals[y]) : '—'}
+                            </td>
+                          );
+                        })}
+                        {(() => {
+                          const grandTotal = Object.values(data.year_totals as Record<number, number>).reduce((s, v) => s + (v || 0), 0);
+                          const yieldPct = data.balance_total && grandTotal
+                            ? ((grandTotal / data.balance_total) * 100).toFixed(2) + '%'
+                            : null;
+                          return (
+                            <td className="px-3 py-2.5 text-right font-mono text-emerald-700 dark:text-emerald-400"
+                              title={yieldPct ? `Yield total: ${yieldPct}` : undefined}>
+                              {fmtBRL(grandTotal)}
+                            </td>
+                          );
+                        })()}
                       </tr>
                       {data.items.map((row: any) => (
                         <tr key={row.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
                           <td className="px-3 py-2.5 font-medium max-w-[160px] truncate sticky left-0 bg-white dark:bg-gray-900" title={row.name}>{row.name}</td>
                           <td className="px-3 py-2.5 text-xs text-gray-400 dark:text-gray-500 whitespace-nowrap">{row.type}</td>
                           <td className="px-3 py-2.5 text-right font-mono text-gray-600">{fmtBRL(row.balance_brl)}</td>
-                          {years.map(y => (
-                            <td key={y} className={`px-3 py-2.5 text-right font-mono ${row.years[y] ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-300 dark:text-gray-600'}`}>
-                              {row.years[y] ? fmtBRL(row.years[y]) : '—'}
-                            </td>
-                          ))}
-                          <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">{fmtBRL(row.total)}</td>
+                          {years.map(y => {
+                            const currentYear = new Date().getFullYear();
+                            const balanceForYear = y < currentYear
+                              ? (row.balance_by_year?.[y] ?? null)
+                              : row.balance_brl;
+                            const yieldPct = balanceForYear && row.years[y]
+                              ? ((row.years[y] / balanceForYear) * 100).toFixed(2) + '%'
+                              : null;
+                            const tooltipBase = yieldPct ? `Yield ${y}: ${yieldPct}` : undefined;
+                            const tooltip = yieldPct && y < currentYear && row.balance_by_year?.[y]
+                              ? `${tooltipBase} (saldo dic-${y}: ${fmtBRL(balanceForYear)})`
+                              : tooltipBase;
+                            return (
+                              <td key={y} className={`px-3 py-2.5 text-right font-mono ${row.years[y] ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-300 dark:text-gray-600'}`}
+                                title={tooltip}>
+                                {row.years[y] ? fmtBRL(row.years[y]) : '—'}
+                              </td>
+                            );
+                          })}
+                          {(() => {
+                            const yieldPct = row.balance_brl && row.total
+                              ? ((row.total / row.balance_brl) * 100).toFixed(2) + '%'
+                              : null;
+                            return (
+                              <td className="px-3 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400"
+                                title={yieldPct ? `Yield total: ${yieldPct}` : undefined}>
+                                {fmtBRL(row.total)}
+                              </td>
+                            );
+                          })()}
                         </tr>
                       ))}
                     </tbody>

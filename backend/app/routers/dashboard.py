@@ -104,35 +104,54 @@ def get_kpis(db: Session = Depends(get_db)):
     }
 
 
+def _apply_range_filter(query, range_val, date_col):
+    """Filter a query by date range. Supports 1y, 3y, 5y, ytd, all."""
+    from datetime import date
+    if not range_val or range_val == "all":
+        return query
+    today = date.today()
+    if range_val == "ytd":
+        cutoff = date(today.year, 1, 1)
+    else:
+        years = {"1y": 1, "3y": 3, "5y": 5}.get(range_val, 99)
+        cutoff = date(today.year - years, today.month, 1)
+    return query.filter(date_col >= cutoff)
+
+
 @router.get("/evolution")
 def get_evolution(
-    range: Optional[str] = Query("all", description="1y, 3y, 5y, all"),
+    range: Optional[str] = Query("all", description="1y, 3y, 5y, ytd, all"),
     currency: Optional[str] = Query("BRL"),
     db: Session = Depends(get_db),
 ):
     """Serie historica mensual del portfolio total."""
-    query = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.asc())
+    # Build the list of valid snapshot dates (for range filtering and change_pct)
+    snap_query = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.asc())
+    snap_query = _apply_range_filter(snap_query, range, PortfolioSnapshot.date)
+    snapshots = snap_query.all()
+    if not snapshots:
+        return []
 
-    if range and range != "all":
-        from datetime import date
-        from dateutil.relativedelta import relativedelta
-        years = {"1y": 1, "3y": 3, "5y": 5}.get(range, 99)
-        cutoff = date.today().replace(day=1)
-        from datetime import timedelta
-        # Approximate years in months
-        import calendar
-        year = cutoff.year - years
-        cutoff_date = date(year, cutoff.month, 1)
-        query = query.filter(PortfolioSnapshot.date >= cutoff_date)
+    snap_by_date = {s.date: s for s in snapshots}
+    dates = [s.date for s in snapshots]
 
-    snapshots = query.all()
+    # Aggregate totals from monthly_positions (same source as KPI card)
+    col = MonthlyPosition.balance_usd if currency == "USD" else MonthlyPosition.balance_brl
+    rows = (
+        db.query(MonthlyPosition.date, func.sum(col).label("total"))
+        .filter(MonthlyPosition.date.in_(dates))
+        .group_by(MonthlyPosition.date)
+        .order_by(MonthlyPosition.date.asc())
+        .all()
+    )
+    totals_by_date = {r.date: (r.total or 0) for r in rows}
+
     result = []
-    for s in snapshots:
-        value = s.total_usd if currency == "USD" else (s.total_brl or 0)
+    for snap in snapshots:
         result.append({
-            "date": s.date.isoformat(),
-            "value": value,
-            "change_pct": s.monthly_change_pct,
+            "date": snap.date.isoformat(),
+            "value": totals_by_date.get(snap.date, 0),
+            "change_pct": snap.monthly_change_pct,
         })
     return result
 
@@ -213,10 +232,7 @@ def get_evolution_by_type(
         .order_by(MonthlyPosition.date.asc())
     )
 
-    if range and range != "all":
-        years = {"1y": 1, "3y": 3, "5y": 5}.get(range, 99)
-        cutoff = date(date.today().year - years, date.today().month, 1)
-        query = query.filter(MonthlyPosition.date >= cutoff)
+    query = _apply_range_filter(query, range, MonthlyPosition.date)
 
     rows = query.all()
 
@@ -247,21 +263,18 @@ def get_benchmarks(
     range: Optional[str] = Query("all"),
     db: Session = Depends(get_db),
 ):
-    """Retorna taxas mensais CDI e IPCA, usando caché local e buscando só o que falta."""
+    """Retorna taxas mensais CDI, IPCA y USD (variacion mensual del tipo de cambio BRL/USD)."""
     from datetime import date
     import requests as req
     from app.models.market_rate import MarketRate
 
     # Determine date range from portfolio snapshots
-    query = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.asc())
-    if range and range != "all":
-        years = {"1y": 1, "3y": 3, "5y": 5}.get(range, 99)
-        cutoff = date(date.today().year - years, date.today().month, 1)
-        query = query.filter(PortfolioSnapshot.date >= cutoff)
-    snapshots = query.all()
+    snap_query = db.query(PortfolioSnapshot).order_by(PortfolioSnapshot.date.asc())
+    snap_query = _apply_range_filter(snap_query, range, PortfolioSnapshot.date)
+    snapshots = snap_query.all()
 
     if not snapshots:
-        return {"cdi": [], "ipca": []}
+        return {"cdi": [], "ipca": [], "usd": []}
 
     date_from = snapshots[0].date
     date_to = snapshots[-1].date
@@ -269,7 +282,6 @@ def get_benchmarks(
     SERIES = {"cdi": 4391, "ipca": 433}
 
     def fetch_and_cache(series_name: str, series_id: int):
-        # Find latest cached date for this series
         row = (
             db.query(MarketRate.date)
             .filter(MarketRate.series == series_name)
@@ -278,18 +290,15 @@ def get_benchmarks(
         )
         latest_cached = row[0] if row else None
 
-        # Only fetch from BCB if we're missing data
-        # Fetch from the month after the latest cached, or from the start if nothing cached
         if latest_cached:
             from datetime import datetime
             last_dt = datetime.strptime(latest_cached, "%Y-%m")
-            # Advance one month
             if last_dt.month == 12:
                 fetch_from = date(last_dt.year + 1, 1, 1)
             else:
                 fetch_from = date(last_dt.year, last_dt.month + 1, 1)
         else:
-            fetch_from = date(2010, 1, 1)  # fetch all history
+            fetch_from = date(2010, 1, 1)
 
         if fetch_from <= date_to:
             url = (
@@ -320,7 +329,6 @@ def get_benchmarks(
     for name, sid in SERIES.items():
         fetch_and_cache(name, sid)
 
-    # Read from local cache for the requested range
     date_from_key = date_from.strftime("%Y-%m")
     date_to_key = date_to.strftime("%Y-%m")
 
@@ -334,9 +342,30 @@ def get_benchmarks(
         .all()
     )
 
-    result: dict = {"cdi": [], "ipca": []}
+    result: dict = {"cdi": [], "ipca": [], "usd": []}
     for r in rows:
-        result[r.series].append({"date": r.date, "rate": r.rate})
+        if r.series in result:
+            result[r.series].append({"date": r.date, "rate": r.rate})
+
+    # USD: compute monthly returns from usd_rate stored in portfolio snapshots
+    usd_snaps = (
+        db.query(PortfolioSnapshot.date, PortfolioSnapshot.usd_rate)
+        .filter(
+            PortfolioSnapshot.date >= date_from,
+            PortfolioSnapshot.date <= date_to,
+            PortfolioSnapshot.usd_rate.isnot(None),
+            PortfolioSnapshot.usd_rate > 0,
+        )
+        .order_by(PortfolioSnapshot.date.asc())
+        .all()
+    )
+
+    prev_rate = None
+    for snap_date, usd_rate in usd_snaps:
+        if prev_rate is not None and prev_rate > 0:
+            monthly_return = (usd_rate - prev_rate) / prev_rate
+            result["usd"].append({"date": snap_date.strftime("%Y-%m"), "rate": monthly_return})
+        prev_rate = usd_rate
 
     return result
 

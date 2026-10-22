@@ -1,0 +1,10 @@
+Extrato Conta Corrente 
+Conta ;000000000
+Período ;01/01/2026 a 31/01/2026
+Saldo: ;110,00
+
+Data Lançamento;Descrição;Valor;Saldo
+02/01/2026;Pix enviado: "Cp :11111111-Titular Ficticio";-100,00;900,00
+03/01/2026;Pix recebido: "Cp :22222222-EMPRESA EXEMPLO LTDA";250,00;1.150,00
+04/01/2026;Pix recebido: "00019 12345 BANCO INTER SA";60,00;1.210,00
+05/01/2026;Pagamento efetuado: "Debito Automatico Fatura Cartao Inter";-1.100,00;110,00

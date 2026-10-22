@@ -1,0 +1,560 @@
+[
+ {
+  "seed_key": "br_conta_investimento",
+  "priority": 10,
+  "field": "description_raw",
+  "pattern": "conta investimento",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "br_pix_titular",
+  "priority": 20,
+  "field": "description_raw",
+  "pattern": "Pix (enviado|recebido).*TITULAR EJEMPLO",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "br_ted_titular",
+  "priority": 30,
+  "field": "description_raw",
+  "pattern": "^TED (recebida|enviada).*TITULAR EJEMPLO",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "br_inter_self",
+  "priority": 40,
+  "field": "description_raw",
+  "pattern": "00019 \\d+ BANCO INTER S\\.? ?A",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "br_card_pay_bank",
+  "priority": 50,
+  "field": "description_raw",
+  "pattern": "Pagamento para BANCO XP|PAGAMENTO DE FATURA|Debito Automatico Fatura Cartao Inter",
+  "amount_sign": "any",
+  "kind": "card_payment"
+ },
+ {
+  "seed_key": "br_card_pay_fatura",
+  "priority": 60,
+  "field": "description_raw",
+  "pattern": "Pagamentos Validos Normais|^Pagamento de fatura$",
+  "amount_sign": "any",
+  "kind": "card_payment"
+ },
+ {
+  "seed_key": "br_fgc",
+  "priority": 70,
+  "field": "description_raw",
+  "pattern": "FUNDO GARANTIDOR DE CREDITOS",
+  "amount_sign": "any",
+  "kind": "investment_withdrawal"
+ },
+ {
+  "seed_key": "br_invest_contrib",
+  "priority": 80,
+  "field": "description_raw",
+  "pattern": "Brasil Bitcoin|Mercado Bitcoin|Alpha Trading|Deitres|Debito Online Td|Debito Renda Fixa",
+  "amount_sign": "any",
+  "kind": "investment_contribution"
+ },
+ {
+  "seed_key": "br_fx",
+  "priority": 90,
+  "field": "description_raw",
+  "pattern": "LIQ\\. CAMBIO",
+  "amount_sign": "any",
+  "kind": "fx_conversion"
+ },
+ {
+  "seed_key": "br_iof_cambio",
+  "priority": 100,
+  "field": "description_raw",
+  "pattern": "IOF CAMBIO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "br_aluguel_nota",
+  "priority": 110,
+  "field": "description_raw",
+  "pattern": "Nota de Aluguel",
+  "amount_sign": "any",
+  "kind": "income",
+  "category": "Rendimientos"
+ },
+ {
+  "seed_key": "br_provento",
+  "priority": 120,
+  "field": "description_raw",
+  "pattern": "Credito B3|Credito Evento B3|SUNNYHUB",
+  "amount_sign": "any",
+  "kind": "provento"
+ },
+ {
+  "seed_key": "br_empresa_pj",
+  "priority": 130,
+  "field": "description_raw",
+  "pattern": "EMPRESA PJ EJEMPLO",
+  "amount_sign": "positive",
+  "kind": "income",
+  "entity": "pj"
+ },
+ {
+  "seed_key": "br_darf_simples",
+  "priority": 140,
+  "field": "description_raw",
+  "pattern": "DARF-SIMPLES",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Impuestos",
+  "entity": "pj"
+ },
+ {
+  "seed_key": "br_darf",
+  "priority": 150,
+  "field": "description_raw",
+  "pattern": "Pagamento efetuado DARF",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Impuestos",
+  "entity": "personal"
+ },
+ {
+  "seed_key": "br_contador",
+  "priority": 160,
+  "field": "description_raw",
+  "pattern": "CONTADOR EJEMPLO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Servicios profesionales",
+  "entity": "pj"
+ },
+ {
+  "seed_key": "br_condominio",
+  "priority": 170,
+  "field": "description_raw",
+  "pattern": "CONDOMINIO EJEMPLO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Condominio / expensas",
+  "entity": "bertioga"
+ },
+ {
+  "seed_key": "br_municipalidad",
+  "priority": 180,
+  "field": "description_raw",
+  "pattern": "MUNICIPALIDAD EJEMPLO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Impuestos",
+  "entity": "bertioga"
+ },
+ {
+  "seed_key": "br_electricidad",
+  "priority": 190,
+  "field": "description_raw",
+  "pattern": "ELECTRICIDAD EJEMPLO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Servicios",
+  "entity": "bertioga"
+ },
+ {
+  "seed_key": "br_limpieza",
+  "priority": 200,
+  "field": "description_raw",
+  "pattern": "PERSONAL LIMPIEZA EJEMPLO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Limpieza",
+  "entity": "bertioga"
+ },
+ {
+  "seed_key": "br_telefonia",
+  "priority": 210,
+  "field": "description_raw",
+  "pattern": "VIVO SP|Telefonica Brasil",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Servicios",
+  "needs_review": true
+ },
+ {
+  "seed_key": "br_cargos_fin",
+  "priority": 220,
+  "field": "description_raw",
+  "pattern": "Encargos de Refinanciamento|Multa Contratual|Juros de Mora|IOF Rotativo",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Cargos financieros"
+ },
+ {
+  "seed_key": "br_anuidade",
+  "priority": 230,
+  "field": "description_raw",
+  "pattern": "^ANUIDADE CARTAO|^ESTORNO ANUIDADE",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Cargos bancarios"
+ },
+ {
+  "seed_key": "br_iof_exterior",
+  "priority": 240,
+  "field": "description_raw",
+  "pattern": "IOF Exterior",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "br_rendimento",
+  "priority": 250,
+  "field": "description_raw",
+  "pattern": "Rendimento autom",
+  "amount_sign": "any",
+  "kind": "income",
+  "category": "Rendimientos"
+ },
+ {
+  "seed_key": "br_saque",
+  "priority": 260,
+  "field": "description_raw",
+  "pattern": "Saque|TARIFA DE SAQUE",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Efectivo"
+ },
+ {
+  "seed_key": "br_suscripciones",
+  "priority": 270,
+  "field": "merchant_normalized",
+  "pattern": "NETFLIX|APPLECOMBILL|AMAZONPRIMEBR|SPOTIFY",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Suscripciones"
+ },
+ {
+  "seed_key": "br_autopass",
+  "priority": 280,
+  "field": "description_raw",
+  "pattern": "AUTOPASS",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Transporte"
+ },
+ {
+  "seed_key": "br_aereas",
+  "priority": 290,
+  "field": "description_raw",
+  "pattern": "LATAM AIR|AEROLINEAS|FRONTIER|DELTA AIR|EASYJET|GOL LINHAS|AZUL LINHAS",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Viajes"
+ },
+ {
+  "seed_key": "br_supermercado",
+  "priority": 300,
+  "field": "description_raw",
+  "pattern": "PAO DE ACUCAR|CARREFOUR|SUPERMERCADO",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Supermercado"
+ },
+ {
+  "seed_key": "ar_transfer_titular",
+  "priority": 310,
+  "field": "description_raw",
+  "pattern": "Transferencia (realizada|recibida|inmediata).*ejemplo titular",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "ar_mp_transfer_titular",
+  "priority": 320,
+  "field": "description_raw",
+  "pattern": "Transferencia (enviada|recibida) Ejemplo Titular",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "ar_mp_reserva",
+  "priority": 330,
+  "field": "description_raw",
+  "pattern": "^Dinero (reservado|retirado)",
+  "amount_sign": "any",
+  "kind": "own_transfer"
+ },
+ {
+  "seed_key": "ar_card_pay",
+  "priority": 340,
+  "field": "description_raw",
+  "pattern": "SU PAGO EN (PESOS|USD)",
+  "amount_sign": "any",
+  "kind": "card_payment"
+ },
+ {
+  "seed_key": "ar_card_pay_mc",
+  "priority": 350,
+  "field": "description_raw",
+  "pattern": "Pago de servicios.*Mastercard",
+  "amount_sign": "any",
+  "kind": "card_payment"
+ },
+ {
+  "seed_key": "ar_impuestos",
+  "priority": 360,
+  "field": "description_raw",
+  "pattern": "IMPUESTO DE SELLOS|IIBB PERCEP|IVA RG 4240|DB\\.RG 5617",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_mp_rendimientos",
+  "priority": 370,
+  "field": "description_raw",
+  "pattern": "^Rendimientos$",
+  "amount_sign": "any",
+  "kind": "income",
+  "category": "Rendimientos"
+ },
+ {
+  "seed_key": "ar_uber",
+  "priority": 380,
+  "field": "description_raw",
+  "pattern": "UBER",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Transporte"
+ },
+ {
+  "seed_key": "ar_transporte",
+  "priority": 390,
+  "field": "description_raw",
+  "pattern": "SHELLBOX|ESTACION DE SERVICIO|AUBASA",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Transporte"
+ },
+ {
+  "seed_key": "ar_pedidosya",
+  "priority": 400,
+  "field": "description_raw",
+  "pattern": "PEDIDOSYA",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Restaurantes y delivery"
+ },
+ {
+  "seed_key": "ar_super",
+  "priority": 410,
+  "field": "description_raw",
+  "pattern": "DISCO|Supermercado|MENOR COSTE",
+  "amount_sign": "any",
+  "kind": "expense",
+  "category": "Supermercado"
+ },
+ {
+  "seed_key": "ar_mp_suscripcion",
+  "pattern": "^Pago de suscripci",
+  "kind": "expense",
+  "category": "Suscripciones",
+  "priority": 420,
+  "field": "description_raw",
+  "amount_sign": "negative"
+ },
+ {
+  "seed_key": "ar_mp_servicios",
+  "pattern": "^Pago de servicio (Personal|Claro|Movistar|Telecentro|Edenor|Edesur|Metrogas|Aysa|Naturgy)",
+  "kind": "expense",
+  "category": "Servicios",
+  "priority": 430,
+  "field": "description_raw",
+  "amount_sign": "negative"
+ },
+ {
+  "seed_key": "ar_mp_qr",
+  "pattern": "^Pago con QR",
+  "kind": "expense",
+  "category": "Otros",
+  "priority": 440,
+  "field": "description_raw",
+  "amount_sign": "negative"
+ },
+ {
+  "seed_key": "ar_card_pay_account",
+  "priority": 450,
+  "field": "description_raw",
+  "pattern": "^Pago (de )?tarjeta de credito",
+  "amount_sign": "negative",
+  "kind": "card_payment"
+ },
+ {
+  "seed_key": "ar_bank_comision",
+  "pattern": "^Comision ",
+  "kind": "expense",
+  "category": "Cargos bancarios",
+  "amount_sign": "negative",
+  "priority": 460,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_bank_iva",
+  "pattern": "^Iva 21%",
+  "kind": "expense",
+  "category": "Cargos bancarios",
+  "amount_sign": "negative",
+  "priority": 470,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_bank_ley25413",
+  "pattern": "^Impuesto ley 25\\.413",
+  "kind": "expense",
+  "category": "Impuestos",
+  "priority": 480,
+  "field": "description_raw",
+  "amount_sign": "any"
+ },
+ {
+  "seed_key": "ar_bank_interes",
+  "pattern": "^Pago interes por saldo",
+  "kind": "income",
+  "category": "Rendimientos",
+  "amount_sign": "positive",
+  "priority": 490,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_promo_modo",
+  "pattern": "^Promo modo",
+  "kind": "refund",
+  "category": "Otros",
+  "amount_sign": "positive",
+  "priority": 500,
+  "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_arba",
+  "priority": 510,
+  "field": "description_raw",
+  "pattern": "^Pago de servicios Arba",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_afip_vep",
+  "priority": 520,
+  "field": "description_raw",
+  "pattern": "AFIP\\s*VEP",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_municipal",
+  "priority": 530,
+  "field": "description_raw",
+  "pattern": "^Pago de servicios Gral puey",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_educacion",
+  "priority": 540,
+  "field": "description_raw",
+  "pattern": "(Pago de servicios (Universidad|Pagos educ)|colegio)",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Educación"
+ },
+ {
+  "seed_key": "ar_toyota_plan",
+  "priority": 550,
+  "field": "description_raw",
+  "pattern": "Pago de servicios?.*Toyota",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Auto"
+ },
+ {
+  "seed_key": "ar_extraccion",
+  "priority": 560,
+  "field": "description_raw",
+  "pattern": "^Extraccion",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Efectivo"
+ },
+ {
+  "seed_key": "gen_entradas",
+  "priority": 570,
+  "field": "merchant_normalized",
+  "pattern": "EVENTIM|TICKETEK|PASSLINE|DALEPLAY",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Ocio y entretenimiento"
+ },
+ {
+  "seed_key": "gen_ropa",
+  "priority": 580,
+  "field": "merchant_normalized",
+  "pattern": "INDITEX|ADIDAS|NIKE|ZARA|RENNER",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Ropa y calzado"
+ },
+ {
+  "seed_key": "gen_autos_alquiler",
+  "priority": 590,
+  "field": "merchant_normalized",
+  "pattern": "LOCALIZA|UNIDAS|HERTZ|MOVIDA",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Viajes"
+ },
+ {
+  "seed_key": "gen_viajes",
+  "priority": 600,
+  "field": "merchant_normalized",
+  "pattern": "SKYAIRLINE|JETSMART|FLYBONDI|BOOKING|AIRBNB|DESPEGAR",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Viajes"
+ },
+ {
+  "seed_key": "gen_super_ar",
+  "priority": 610,
+  "field": "merchant_normalized",
+  "pattern": "COTO|CENCOSUD|JUMBO|CHANGOMAS|CARREFOUR",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Supermercado"
+ },
+ {
+  "seed_key": "gen_farmacia",
+  "priority": 620,
+  "field": "merchant_normalized",
+  "pattern": "^FARMACIA|FARMACITY|DROGARIA|DROGASIL",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Salud y farmacia"
+ },
+ {
+  "seed_key": "br_crypto_transfer",
+  "priority": 79,
+  "field": "description_raw",
+  "pattern": "Bitcoin|Alpha Trading",
+  "amount_sign": "any",
+  "kind": "fx_conversion"
+ }
+]

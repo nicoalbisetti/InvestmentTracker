@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from typing import Optional
+from collections import defaultdict
 from app.database import get_db
 from app.models.provento import Provento
 from app.models.provento_forecast import ProventoForecast
@@ -10,6 +11,7 @@ from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from datetime import date
 from sqlalchemy import extract
+from app.services.provento_currency import get_month_usd_rate, to_brl
 
 router = APIRouter(prefix="/api/proventos", tags=["proventos"])
 
@@ -28,6 +30,7 @@ def get_proventos(
     years = list(range(current_year, current_year - 7, -1))
 
     # Get instruments with proventos (from proventos table) OR provento_items (current year)
+    # OR forecast for current year (instruments with no history yet)
     hist_ids = {r[0] for r in (
         db.query(Instrument.id)
         .join(Provento, Provento.instrument_id == Instrument.id)
@@ -40,8 +43,14 @@ def get_proventos(
         .distinct()
         .all()
     )}
+    forecast_ids = {r[0] for r in (
+        db.query(ProventoForecast.instrument_id)
+        .filter(ProventoForecast.year == current_year)
+        .distinct()
+        .all()
+    )}
     all_inst_ids_query = db.query(Instrument.id).filter(
-        Instrument.id.in_(hist_ids | curr_ids)
+        Instrument.id.in_(hist_ids | curr_ids | forecast_ids)
     )
     if status:
         all_inst_ids_query = all_inst_ids_query.filter(Instrument.status == status)
@@ -108,6 +117,31 @@ def get_proventos(
             existing = prov_map.get((inst_id, current_year), 0) or 0
             prov_map[(inst_id, current_year)] = existing + (amt or 0)
 
+    # Historical balance per instrument per year: last available month of each year
+    past_years = [yr for yr in years if yr < current_year]
+    hist_positions = (
+        db.query(MonthlyPosition)
+        .filter(
+            MonthlyPosition.instrument_id.in_(paginated_ids),
+            MonthlyPosition.date >= date(min(past_years), 1, 1),
+            MonthlyPosition.date <= date(max(past_years), 12, 1),
+        )
+        .all()
+    ) if past_years else []
+
+    # {instrument_id: {year: balance_brl}} — keep latest month per year
+    balance_by_year: dict = defaultdict(dict)
+    for pos in hist_positions:
+        y = pos.date.year
+        existing = balance_by_year[pos.instrument_id].get(y)
+        if existing is None or pos.date > existing[0]:
+            balance_by_year[pos.instrument_id][y] = (pos.date, pos.balance_brl)
+    # Flatten to just the balance value
+    balance_by_year = {
+        inst_id: {yr: val[1] for yr, val in yr_map.items()}
+        for inst_id, yr_map in balance_by_year.items()
+    }
+
     instruments = db.query(Instrument).filter(Instrument.id.in_(paginated_ids)).all()
     inst_map = {i.id: i for i in instruments}
 
@@ -122,6 +156,7 @@ def get_proventos(
             "type": inst.type,
             "custodian": inst.custodian,
             "balance_brl": inst.current_balance_brl,
+            "balance_by_year": balance_by_year.get(inst_id, {}),
             "years": {yr: prov_map.get((inst_id, yr)) for yr in years},
             "total": sum(v for v in [prov_map.get((inst_id, yr)) for yr in years] if v),
         }
@@ -281,6 +316,49 @@ def get_proventos_grid(
     )
     forecast_map: dict[tuple, float] = {(r.instrument_id, r.month): r.amount for r in forecast_rows}
 
+    # Montos en moneda nativa para instrumentos USD (los items sin amount_native se
+    # derivan de amount_brl / cotización del mes)
+    usd_ids = [i.id for i in instruments if i.currency == "USD"]
+    paid_native_map: dict[tuple, float] = {}
+    forecast_native_map: dict[tuple, float] = {}
+    if usd_ids:
+        rate_cache: dict[int, Optional[float]] = {}
+
+        def _rate(m: int):
+            if m not in rate_cache:
+                rate_cache[m] = get_month_usd_rate(db, target_year, m)
+            return rate_cache[m]
+
+        usd_items = (
+            db.query(ProvéntoItem)
+            .filter(
+                ProvéntoItem.instrument_id.in_(usd_ids),
+                extract('year', ProvéntoItem.date) == target_year,
+            )
+            .all()
+        )
+        for it in usd_items:
+            native = it.amount_native
+            if native is None and _rate(it.date.month):
+                native = it.amount_brl / _rate(it.date.month)
+            if native is not None:
+                key = (it.instrument_id, it.date.month)
+                paid_native_map[key] = paid_native_map.get(key, 0) + native
+        usd_forecasts = (
+            db.query(ProventoForecast)
+            .filter(
+                ProventoForecast.instrument_id.in_(usd_ids),
+                ProventoForecast.year == target_year,
+            )
+            .all()
+        )
+        for f in usd_forecasts:
+            native = f.amount_native
+            if native is None and _rate(f.month):
+                native = f.amount / _rate(f.month)
+            if native is not None:
+                forecast_native_map[(f.instrument_id, f.month)] = native
+
     items = []
     for inst in instruments:
         months = {m: paid_map.get((inst.id, m)) for m in MONTHS}
@@ -299,8 +377,15 @@ def get_proventos_grid(
             "type": inst.type,
             "location": inst.location,
             "custodian": inst.custodian,
+            "currency": inst.currency or "BRL",
             "months": months,
             "forecast_months": forecast_months,
+            "months_native": {m: round(paid_native_map[(inst.id, m)], 2) for m in MONTHS if (inst.id, m) in paid_native_map},
+            "forecast_months_native": {
+                m: round(forecast_native_map[(inst.id, m)], 2)
+                for m in MONTHS
+                if (inst.id, m) in forecast_native_map and months[m] is None
+            },
             "total": total,
         })
 
@@ -344,13 +429,25 @@ def upsert_provento_grid(
     """
     Replace ALL provento_items for this instrument/month with a single MANUAL record.
     Pass amount=null or 0 to delete everything for that cell.
+    `amount` está en la moneda del instrumento; para USD se convierte a BRL con la
+    cotización del mes y se guarda también el monto nativo.
     """
     if month < 1 or month > 12:
         raise HTTPException(status_code=400, detail="Mes inválido")
+    inst = db.query(Instrument).filter_by(id=instrument_id).first()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instrumento no encontrado")
 
     from datetime import date as date_type
     import calendar
     amount = payload.get("amount")
+
+    amount_brl = amount_native = None
+    if amount is not None and amount != 0:
+        try:
+            amount_brl, amount_native, _ = to_brl(db, amount, inst.currency, year, month)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
     # Delete ALL records for this instrument/month (imported + manual)
     db.query(ProvéntoItem).filter(
@@ -367,9 +464,13 @@ def upsert_provento_grid(
     db.add(ProvéntoItem(
         instrument_id=instrument_id,
         date=date_type(year, month, last_day),
-        amount_brl=float(amount),
+        amount_brl=amount_brl,
+        amount_native=amount_native,
         type="dividendo",
         source="MANUAL",
     ))
     db.commit()
-    return {"instrument_id": instrument_id, "year": year, "month": month, "amount": float(amount)}
+    return {
+        "instrument_id": instrument_id, "year": year, "month": month,
+        "amount": float(amount), "amount_brl": amount_brl, "amount_native": amount_native,
+    }

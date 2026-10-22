@@ -65,7 +65,6 @@ export default function EquityTrades() {
 
   // Filter state
   const [filterInstrumentId, setFilterInstrumentId] = useState<number | null>(preselectedId);
-  const [filterInstrumentLabel, setFilterInstrumentLabel] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
   const [filterDateTo, setFilterDateTo] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -93,7 +92,6 @@ export default function EquityTrades() {
       client.get(`/api/instruments/${preselectedId}`)
         .then(r => {
           const inst = r.data;
-          setFilterInstrumentLabel(inst.ticker ? `${inst.ticker} — ${inst.name}` : inst.name);
           setInstrSearch(inst.ticker ? `${inst.ticker} — ${inst.name}` : inst.name);
         })
         .catch(() => {});
@@ -162,10 +160,12 @@ export default function EquityTrades() {
               instrument_id: editTrade.instrument_id,
               instrument_name: editTrade.instrument_name,
               instrument_ticker: editTrade.instrument_ticker,
+              instrument_currency: editTrade.instrument_currency,
               date: editTrade.date,
               trade_type: editTrade.trade_type as 'compra' | 'venta',
               quantity: editTrade.quantity,
               price: editTrade.price,
+              usd_rate: editTrade.usd_rate,
               notes: editTrade.notes ?? '',
             }}
             onSubmit={handleEdit}
@@ -199,7 +199,7 @@ export default function EquityTrades() {
               value={instrSearch}
               onChange={e => {
                 setInstrSearch(e.target.value);
-                if (!e.target.value) { setFilterInstrumentId(null); setFilterInstrumentLabel(''); }
+                if (!e.target.value) { setFilterInstrumentId(null); }
               }}
               onFocus={() => instrOptions.length > 0 && setShowInstrDropdown(true)}
               autoComplete="off"
@@ -214,7 +214,6 @@ export default function EquityTrades() {
                     onClick={() => {
                       setFilterInstrumentId(inst.id);
                       const label = inst.ticker ? `${inst.ticker} — ${inst.name}` : inst.name;
-                      setFilterInstrumentLabel(label);
                       setInstrSearch(label);
                       setShowInstrDropdown(false);
                       setPage(1);
@@ -255,7 +254,6 @@ export default function EquityTrades() {
               className="btn-secondary text-sm"
               onClick={() => {
                 setFilterInstrumentId(null);
-                setFilterInstrumentLabel('');
                 setInstrSearch('');
                 setFilterDateFrom('');
                 setFilterDateTo('');
@@ -293,6 +291,7 @@ export default function EquityTrades() {
                     <th className="px-3 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Cantidad</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Precio Unit.</th>
                     <th className="px-3 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Monto Total</th>
+                    <th className="px-3 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Monto USD</th>
                     <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Notas</th>
                     <th className="px-3 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Acciones</th>
                   </tr>
@@ -318,9 +317,17 @@ export default function EquityTrades() {
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono text-gray-700 dark:text-gray-300">{fmtNum(trade.quantity)}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-gray-700 dark:text-gray-300">
+                        {trade.instrument_currency === 'USD' && (
+                          <span className="text-xs text-blue-500 dark:text-blue-400 mr-1">USD</span>
+                        )}
                         {trade.price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </td>
                       <td className="px-3 py-2.5 text-right font-mono text-gray-800 dark:text-gray-200">{fmtBRL(trade.amount_brl)}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-gray-500 dark:text-gray-400 text-xs">
+                        {trade.usd_rate && trade.amount_brl
+                          ? `$${(trade.amount_brl / trade.usd_rate).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : '—'}
+                      </td>
                       <td className="px-3 py-2.5 text-gray-500 dark:text-gray-400 max-w-[120px] truncate" title={trade.notes ?? ''}>
                         {trade.notes || '—'}
                       </td>

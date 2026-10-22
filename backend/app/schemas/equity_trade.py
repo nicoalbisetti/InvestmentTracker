@@ -9,6 +9,7 @@ class EquityTradeCreate(BaseModel):
     trade_type: Literal["compra", "venta"]
     quantity: float
     price: float
+    usd_rate: Optional[float] = None
     notes: Optional[str] = None
 
     @field_validator("quantity", "price")
@@ -24,6 +25,7 @@ class EquityTradeUpdate(BaseModel):
     trade_type: Optional[Literal["compra", "venta"]] = None
     quantity: Optional[float] = None
     price: Optional[float] = None
+    usd_rate: Optional[float] = None
     notes: Optional[str] = None
 
 
@@ -34,11 +36,13 @@ class EquityTradeOut(BaseModel):
     trade_type: str
     quantity: float
     price: float
+    usd_rate: Optional[float]
     amount_brl: Optional[float]
     notes: Optional[str]
     created_at: datetime
     instrument_name: str
     instrument_ticker: Optional[str]
+    instrument_currency: str
 
     model_config = {"from_attributes": True}
 
@@ -47,10 +51,13 @@ class EquityTradeSummary(BaseModel):
     instrument_id: int
     instrument_name: str
     instrument_ticker: Optional[str]
+    currency: str
+    is_usd: bool
     total_compras_qty: float
     total_ventas_qty: float
     qty_actual: float
     avg_price_compra: Optional[float]
     ultimo_precio: Optional[float]
+    usd_rate_last: Optional[float]
     pl_no_realizado: Optional[float]
     pl_no_realizado_pct: Optional[float]

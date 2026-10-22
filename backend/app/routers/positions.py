@@ -581,6 +581,27 @@ def update_position_unit_price(
     }
 
 
+@router.patch("/{mp_id}/avg-price")
+def update_position_avg_price(
+    mp_id: int,
+    payload: dict,
+    db: Session = Depends(get_db),
+):
+    from fastapi import HTTPException
+    mp = db.query(MonthlyPosition).filter_by(id=mp_id).first()
+    if not mp:
+        raise HTTPException(status_code=404, detail="Posición no encontrada")
+
+    avg_price_val = payload.get("avg_price")
+    if avg_price_val is None or isinstance(avg_price_val, bool) or not isinstance(avg_price_val, (int, float)) or avg_price_val <= 0:
+        raise HTTPException(status_code=422, detail="avg_price debe ser un número positivo")
+
+    mp.avg_price = float(avg_price_val)
+    db.commit()
+
+    return {"mp_id": mp_id, "avg_price": mp.avg_price}
+
+
 @router.patch("/{mp_id}/balance")
 def update_position_balance(
     mp_id: int,

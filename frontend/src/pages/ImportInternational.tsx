@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   InternationalImportConfig,
   InternationalDiffItem,
-  DividendDiffItem,
   PreviewResponse,
   ConfirmResponse,
   previewInternational,
@@ -595,7 +594,7 @@ export default function ImportInternational() {
   const [result, setResult] = useState<ConfirmResponse | null>(null);
   const configRef = useRef<InternationalImportConfig | null>(null);
 
-  async function handleStep1(file: File, period: string, rate: number, cfg: InternationalImportConfig) {
+  async function handleStep1(file: File, period: string, _rate: number, cfg: InternationalImportConfig) {
     setLoading(true);
     setError(null);
     try {

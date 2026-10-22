@@ -61,6 +61,7 @@ export const INSTRUMENT_TYPE_COLORS: Record<string, string> = {
   saving: '#14b8a6',
   fgts: '#84cc16',
   outro: '#6b7280',
+  internacional: '#6366f1',
 };
 
 export const CUSTODIAN_COLORS: Record<string, string> = {

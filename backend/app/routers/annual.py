@@ -5,6 +5,7 @@ from app.database import get_db
 from app.models.annual_summary import AnnualSummary
 from app.models.portfolio_snapshot import PortfolioSnapshot
 from app.models.transaction import Transaction
+from app.models.equity_trade import EquityTrade
 from app.models.instrument import Instrument
 from datetime import date
 
@@ -157,10 +158,25 @@ def get_monthly_growth(year: int = Query(...), db: Session = Depends(get_db)):
         .all()
     )
 
+    equity_trades = (
+        db.query(EquityTrade)
+        .filter(
+            EquityTrade.date >= year_start,
+            EquityTrade.date <= year_end,
+            EquityTrade.amount_brl.isnot(None),
+        )
+        .order_by(EquityTrade.date)
+        .all()
+    )
+
     net_flow_by_month: dict[int, float] = {}
     for t in txns:
         m = t.date.month
         amt = t.amount_brl if t.type == "aplicacion" else -t.amount_brl
+        net_flow_by_month[m] = net_flow_by_month.get(m, 0) + amt
+    for t in equity_trades:
+        m = t.date.month
+        amt = t.amount_brl if t.trade_type == "compra" else -t.amount_brl
         net_flow_by_month[m] = net_flow_by_month.get(m, 0) + amt
 
     dec_prev = (
@@ -193,7 +209,7 @@ def get_monthly_growth(year: int = Query(...), db: Session = Depends(get_db)):
             (patrimonio - base - cumulative_nf) if patrimonio is not None else None
         )
 
-    instrument_ids = {t.instrument_id for t in txns}
+    instrument_ids = {t.instrument_id for t in txns} | {t.instrument_id for t in equity_trades}
     instruments_map: dict[int, str] = {}
     if instrument_ids:
         for inst in db.query(Instrument).filter(Instrument.id.in_(instrument_ids)).all():
@@ -208,6 +224,15 @@ def get_monthly_growth(year: int = Query(...), db: Session = Depends(get_db)):
             "instrument_name": instruments_map.get(t.instrument_id, "Desconocido"),
         }
         for t in txns
+    ] + [
+        {
+            "date": str(t.date),
+            "month": t.date.month,
+            "type": t.trade_type,
+            "amount_brl": t.amount_brl if t.trade_type == "compra" else -t.amount_brl,
+            "instrument_name": instruments_map.get(t.instrument_id, "Desconocido"),
+        }
+        for t in equity_trades
     ]
 
     patrimonio_inicio = base

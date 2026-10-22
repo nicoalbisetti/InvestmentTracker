@@ -1,7 +1,7 @@
 # CONTEXT.md — InvestmentTracker
 
 > Documento de contexto para nuevas sesiones de Claude Code / Claude.ai.
-> Refleja el estado REAL del código al 25 May 2026 (actualizado: Export CSV en Histórico de Posiciones).
+> Refleja el estado REAL del código al 22 Oct 2026 (actualizado: módulo de Gastos — ver `CONTEXT-expenses.md`; proventos pagados/previstos se cargan en la moneda del instrumento; precio medio editable a mano en Posiciones; recálculo de avg_price desde operaciones desactivado).
 
 ---
 
@@ -62,6 +62,11 @@ npm run dev
 ---
 
 ## 3. Estructura de Carpetas
+
+> **Módulo de Gastos:** paquete independiente `backend/app/expenses/` (base SQLite propia `expenses.db` / `expenses_demo.db`,
+> tablas `exp_*`), frontend en `frontend/src/{pages,components}/expenses/`, `api/expenses.ts`, `utils/expenses.ts` y tests en
+> `backend/tests/`. Detalle completo en **`CONTEXT-expenses.md`**. Sólo `main.py` (registro de router y creación de tablas),
+> `App.tsx` y `Sidebar.tsx` tocan código de Inversiones; ningún módulo de Inversiones importa `expenses`.
 
 ```
 InvestmentTracker/
@@ -290,6 +295,7 @@ InvestmentTracker/
 | instrument_id | FK → instruments, indexed | NO |
 | date | Date | NO |
 | amount_brl | Float | NO |
+| amount_native | Float | SI — monto en moneda del instrumento (USD); NULL en BRL. `amount_brl` = native × cotización del mes al momento de guardar |
 | type | String(50) | NO — 'dividendo' \| 'jcp' \| 'amortizacion' |
 | notes | Text | SI |
 | quantity | Float | SI |
@@ -313,7 +319,8 @@ InvestmentTracker/
 | instrument_id | FK → instruments, indexed | NO |
 | year | Integer | NO |
 | month | Integer | NO — 1-12 |
-| amount | Float | NO |
+| amount | Float | NO — BRL |
+| amount_native | Float | SI — monto en moneda del instrumento (USD); NULL en BRL |
 
 **UNIQUE:** `(instrument_id, year, month)`
 
@@ -417,6 +424,7 @@ InvestmentTracker/
 | GET | `/?sort=default&order=asc&...` | Lista paginada; sort=default → brasil→exterior→tipo→nombre |
 | GET | `/export` | CSV stream con posiciones |
 | PATCH | `/{mp_id}/unit-price` | Actualiza unit_price y recalcula balances en cascada (accion/fii). BRL: balance_brl = qty × price, balance_usd = balance_brl / usd_rate. USD: balance_usd = qty × price, balance_brl = balance_usd × usd_rate. Usa mp.usd_rate con fallback al PortfolioSnapshot del mes. Llama sync_snapshot_for_date. |
+| PATCH | `/{mp_id}/avg-price` | Actualiza avg_price (precio medio) de la posición mensual. Body `{avg_price}` > 0, 422 si inválido, 404 si no existe. No toca balances ni snapshot. |
 | PATCH | `/{mp_id}/balance` | Actualiza balance_brl, balance_usd o quantity |
 | GET | `/last-fixed-income-date` | Último mes importado (renta_fija) |
 | GET | `/count-without-price` | Count de renta_fija activos sin balance |
@@ -445,14 +453,14 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/?page&limit&status` | Tabla anual por instrumento (año actual = provento_items + forecast) |
 | GET | `/monthly?year` | Serie mensual: {month, amount(pagado), forecast(no pagado)} |
-| GET | `/grid?year&type` | Grilla editable mensual; incluye `forecast_months` (previstos donde no hay pago) y `paid_month_totals` para coloración diferenciada de totales |
-| PATCH | `/grid/{instrument_id}/{year}/{month}` | Reemplaza TODOS los registros de la celda con uno MANUAL |
+| GET | `/grid?year&type` | Grilla editable mensual; incluye `currency`, `months_native`/`forecast_months_native` (USD), `forecast_months` (previstos donde no hay pago) y `paid_month_totals` para coloración diferenciada de totales |
+| PATCH | `/grid/{instrument_id}/{year}/{month}` | Reemplaza TODOS los registros de la celda con uno MANUAL. `amount` va en la moneda del instrumento; si es USD se convierte a BRL con la cotización del mes (`services/provento_currency.py`: Quote del mes → snapshot → última Quote) y guarda `amount_native`. 422 si no hay cotización. |
 
 ### `/api/proventos/forecast`
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/?year&type` | Grilla de previsión; orden: brasil→exterior→tipo→nombre |
-| PATCH | `/{instrument_id}/{year}/{month}` | Upsert forecast para una celda |
+| PATCH | `/{instrument_id}/{year}/{month}` | Upsert forecast para una celda. `amount` en moneda del instrumento (misma conversión USD→BRL que la grilla pagada). |
 | POST | `/import/preview` | Preview importación Excel de forecast |
 | POST | `/import/confirm` | Confirma importación de forecast |
 
@@ -468,7 +476,7 @@ InvestmentTracker/
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET | `/?status&type&location&currency&custodian&search&sort&order&page&limit` | Lista paginada |
-| POST | `/` | Crea instrumento manualmente; opcionalmente crea MonthlyPosition con balance_usd calculado |
+| POST | `/` | Crea instrumento manualmente; opcionalmente crea MonthlyPosition con balance_usd calculado y una Transaction `aplicacion` (notes "Saldo inicial") por el saldo inicial, para que Análisis de Patrimonio lo cuente como aporte y no como valorización |
 | GET | `/{id}` | Detalle |
 | PUT | `/{id}` | Actualiza campos |
 | POST | `/{id}/rescate-total` | Crea transacción rescate y cierra instrumento (solo renta_fija activo) |
@@ -526,6 +534,14 @@ InvestmentTracker/
 |---|---|---|
 | GET | `/quotes` | Precios y variación del día de instrumentos accion/fii activos vía yfinance. Cache en memoria TTL 5 min. Tickers B3 con sufijo ".SA". Responde siempre HTTP 200. |
 
+### `/api/simulation`
+| Método | Ruta | Descripción |
+|---|---|---|
+| GET | `/api/simulation` | Proyección determinística del portfolio. Query params: `horizon_months` (int 1-120, default 60), `monthly_contribution_brl` (float, default 0), `rate_renta_fija/accion/fii/fundo/internacional` (float anual, defaults 0.13/0.12/0.10/0.11/0.10). Clasifica por tipo e custodian (XP_INTERNATIONAL/XP_INTERNACIONAL → internacional). Proporciones fijas desde snapshot inicial. Response: `{snapshot_date, initial_total_brl, data: [{month, date, total, renta_fija, accion, fii, fundo, internacional}]}` |
+
+### `/api/expenses` (módulo de Gastos)
+Detalle de todos los endpoints en `CONTEXT-expenses.md` §10. Resumen: `accounts`, `imports` (preview/confirm/delete, 409 si el archivo ya se importó), `transactions` (filtros, PATCH, bulk, crear regla), `summary`, `review-queue`, `coverage`, `links/*` (pares, vínculos con Inversiones: sugerir/confirmar/rechazar), `audit/investments` (sólo lectura), `rules`, `categories`, `entities`, `fx/*`, `demo/regenerate`. Usa la base de gastos según `X-Env`; sólo `links`/`audit` leen (nunca escriben) la base de Inversiones.
+
 ### Otros
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -546,7 +562,7 @@ distribución por tipo/custodio/localización (tres donuts con porcentaje en too
 ### Positions (`/positions`)
 Tabla de posiciones filtrable/paginable/sortable. Sort default: brasil→exterior→tipo→nombre.
 Botones para importar Fixed Income, actualizar precios B3, actualizar USD/BRL, copiar mes ant.
-Edición inline: celdas de Saldo BRL, Saldo USD y Cantidad son clickeables para todos los tipos. La celda "Precio actual" (P. Unit.) es clickeable y editable solo para instrumentos tipo accion/fii — muestra subrayado punteado al hover; instrumentos sin precio muestran "Sin precio" en gris itálico.
+Edición inline: celdas de Saldo BRL, Saldo USD y Cantidad son clickeables para todos los tipos. La celda "Precio actual" (P. Unit.) es clickeable y editable solo para instrumentos tipo accion/fii — muestra subrayado punteado al hover; instrumentos sin precio muestran "Sin precio" en gris itálico. La celda "Precio medio" también es clickeable/editable para accion/fii (PATCH `/avg-price`).
 **API:** `/api/positions`, `/api/positions/export`, `/api/positions/copy-previous-month`, etc.
 
 ### History (`/history`)
@@ -574,6 +590,7 @@ Tres tabs:
 - **Histórico:** tabla anual por instrumento. Año actual = provento_items + forecast (misma lógica que gráfico).
 - **Mensual:** gráfico de barras apiladas (Pagado + Previsto por mes). Cards: total pagado, proyección anual, variación vs año anterior.
 - **Grilla pagado:** editable por celda, orden brasil→exterior→tipo→nombre. Celdas con forecast pero sin pago se muestran en ámbar (*) y se incluyen en los totales. Al editar, el valor previsto se pre-popula en el input. El backend devuelve `forecast_months` y `paid_month_totals` por instrumento.
+- **Moneda del instrumento:** en ambas grillas, las filas de instrumentos USD muestran y se editan en USD (tooltip con el equivalente BRL); totales de fila/columna siempre en BRL. El BRL se calcula con la cotización USD/BRL del mes al guardar (si cambia la cotización después, hay que re-guardar la celda). Los items sin `amount_native` (importados) se muestran como BRL ÷ cotización del mes.
 - **Previsión:** grilla de forecast editable, mismo orden.
 **API:** `/api/proventos`, `/api/proventos/monthly`, `/api/proventos/grid`, `/api/proventos/forecast`
 
@@ -616,6 +633,16 @@ Al seleccionar instrumento en filtro: muestra EquityTradeSummaryCard (qty actual
 precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalculados.
 **API:** `/api/equity-trades/*`
 **Link desde Positions:** botón "Ver operaciones" en filas de tipo accion/fii.
+
+### Simulación (`/simulacion`)
+Proyección determinística del portfolio a futuro. Layout dos columnas (md+): panel de controles fijo 288px izquierda, summary + chart derecha. Mobile: columna única.
+**Controles:** slider horizonte 12-120 meses con botones quick-select (1a/3a/5a/10a), aporte mensual en R$, 5 sliders de tasa anual por clase (renta_fija 13%, accion 12%, fii 10%, fundo 11%, internacional 10%) con dot de color. Botón "Restaurar defaults". Debounce 400ms.
+**Gráfico:** `ComposedChart` de Recharts con 5 `Area` apiladas + `Line` discontinua para total. Tooltip muestra todas las clases + total. Eje X cada 12 meses, eje Y abreviado (R$ 1.2M / R$ 850k).
+**KPI Cards:** Valor final, Total aportado, Ganancia estimada (verde/rojo), CAGR implícito. Skeleton mientras carga.
+**API:** `GET /api/simulation`
+
+### Gastos (`/gastos`)
+Módulo de gastos con pestañas por `?tab=`: **Resumen** (KPIs, barras apiladas categoría × mes, tabla, filtros entidad/país/moneda, cobertura de extractos), **Movimientos** (filtros, edición inline, edición masiva, crear regla), **Revisar** (cola por motivo, pares, vínculos con Inversiones y auditoría), **Importar** (wizard con checks de validación) y **Configuración** (cuentas). Ítem "Gastos" en el Sidebar. **API:** `/api/expenses/*`. Detalle en `CONTEXT-expenses.md` §11.
 
 ---
 
@@ -670,6 +697,8 @@ precio, P&L no realizado en BRL y %). Toast de confirmación con meses recalcula
 
 ### `services/equity_recalculate.py`
 - Calcula y persiste `gain` y `gain_pct` en `MonthlyPosition` para acciones/FIIs con Modified Dietz usando trades del mes y balance del mes anterior.
+- `recalculate_equity_positions(instrument_id, from_date, db)` crea la fila de `MonthlyPosition` que falte para **cada mes** entre `from_date` y el mes actual (no solo el primero) antes de recalcular. Así una compra/venta (nueva o con fecha vieja) siempre genera posición hasta el mes en curso, sin depender de rolar los meses manualmente en Positions (`ensure-month`/`copy-previous-month`). Ver sección "Recálculo de posiciones desde operaciones" más abajo.
+- Si una fila queda sin `unit_price` (mes recién creado), busca el precio en Yahoo Finance: cierre de fin de mes para meses cerrados, precio del día para el mes en curso. Con eso calcula `balance_brl`/`balance_usd`, y para instrumentos USD persiste el `usd_rate` usado (de `quotes`, mensual) en la fila.
 
 ### `services/importer.py`
 - Importa el Excel genérico (Inversiones.xlsx) con 6 hojas
@@ -762,8 +791,12 @@ El cliente Axios inyecta `X-Env: demo` si `localStorage.app_env === "demo"`.
 - [x] Monto por moneda en transacciones: formulario solicita monto en moneda nativa del instrumento (BRL/USD), calcula segundo monto con cotización del mes (GET /api/quotes/lookup), input manual si no hay cotización, checkbox para override, modo edición arranca con override=true
 - [x] Distribución con porcentajes y gráfico por localización: DonutChart muestra % en tooltip y leyenda; backend agrega by_location; Dashboard agrega tercer donut "Por Localización" (esmeralda=brasil, índigo=exterior)
 - [x] Edición inline de unit_price en Posiciones: celda P. Unit. clickeable para accion/fii; PATCH /api/positions/{mp_id}/unit-price recalcula balances en cascada con fallback usd_rate; sincroniza PortfolioSnapshot del mes afectado
+- [x] Proventos en moneda del instrumento: grillas Pagado y Previsión cargan/muestran USD para instrumentos USD; backend guarda `amount_native` + BRL convertido con cotización del mes; migración automática `_migrate_provento_native_amounts`
+- [x] Edición inline de avg_price (precio medio) en Posiciones para accion/fii; `recalculate_equity_positions` ya NO pisa avg_price (flag `RECALCULATE_AVG_PRICE = False` en equity_recalculate.py), solo recalcula quantity/balances. El precio medio de operaciones (summary) sigue calculándose desde las MonthlyPosition.
+- [x] Operaciones USD: precio en USD, cotización mensual auto-detectada desde tabla quotes (con override manual), amount_brl = qty × price_usd × rate, avg_price en USD, display dual USD/BRL en formulario y card resumen
 
 ---
+- [x] Módulo de Gastos: importación de extractos AR/BR (6 parsers CSV/PDF con validación de saldos), clasificación por reglas, conciliación (transferencias propias, pagos de tarjeta, aportes/rescates y proventos de Inversiones), resumen por categoría/mes/entidad, auditoría de inversiones — ver `CONTEXT-expenses.md`
 
 ## 10. Features Pendientes
 
@@ -818,6 +851,13 @@ para esa celda (importados + manuales) y crea uno nuevo con `source="MANUAL"`. E
 - Crea la fila de `monthly_positions` si no existe
 - Solo aplica a instrumentos tipo saving/fundo/renta_fija (sin unit_price)
 - No recalcula instrumentos con precio (accion, fii) — esos se actualizan via yfinance
+
+### Recálculo de posiciones desde operaciones (equity trades)
+`equity_recalculate.py::recalculate_equity_positions(instrument_id, from_date, db)`:
+- Antes de recalcular, crea la fila de `monthly_positions` que falte para **cada mes** entre `from_date.month` y el mes actual (no solo el primero) — a diferencia de `transactions.py::_recompute_positions`, que solo garantiza la fila del propio mes de la transacción y deja los meses posteriores sin crear si no existían.
+- Se dispara desde `equity_trades.py::create_trade` y `update_trade` (compra/venta). Antes de este fix, si un instrumento no tenía ninguna `MonthlyPosition` previa (p. ej. instrumento nuevo sin balance inicial), la primera operación no generaba ninguna posición: la función solo actualizaba filas existentes y devolvía `recalculated_months: 0` sin avisar.
+- Si la fila nueva (o cualquiera sin `unit_price`) tiene `quantity != 0`, busca el precio en Yahoo Finance: cierre de fin de mes para meses cerrados, precio del día para el mes en curso (todavía no tiene cierre de fin de mes). Con ese precio calcula `balance_brl` (y `balance_usd` para instrumentos USD), y persiste el `usd_rate` mensual usado (de `quotes`) en la fila — antes se usaba solo para el cálculo y no quedaba trazable.
+- Si Yahoo Finance no tiene dato para ese ticker/fecha (delisted, feriado sin fallback, etc.), `unit_price`/`balance_brl`/`balance_usd` quedan en `None` sin romper el resto del recálculo — el botón manual "actualizar precios" de Positions sigue siendo el fallback.
 
 ### Cross-custodio en Fixed Income
 Mismo instrumento en 2 custodios → 2 `MonthlyPosition` con `custodian_override` diferente.

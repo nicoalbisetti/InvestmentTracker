@@ -52,7 +52,7 @@ export default function StackedAreaChart({ data, types, height = 300 }: Props) {
           width={70}
         />
         <Tooltip
-          formatter={(val: any, name: string) => [fmtBRL(val), TYPE_LABELS[name] || name]}
+          formatter={(val: any, name: any) => [fmtBRL(val), TYPE_LABELS[name] || name]}
           labelFormatter={v => { const [y, m] = v.split('-'); return `${m}/${y}`; }}
           contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
         />

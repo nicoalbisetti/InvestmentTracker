@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom';
 import { useState } from 'react';
 import {
   LayoutDashboard, Briefcase, CalendarDays, BarChart2,
-  Landmark, ArrowLeftRight, Settings2, ChevronLeft, ChevronRight, TrendingUp, Globe,
+  Landmark, ArrowLeftRight, Settings2, ChevronLeft, ChevronRight, TrendingUp, Globe, LineChart, Wallet,
 } from 'lucide-react';
 import { useEnv } from '../../context/EnvContext';
 
@@ -13,6 +13,8 @@ const NAV_ITEMS = [
   { to: '/annual',       label: 'Análisis de Patrimonio', Icon: BarChart2 },
   { to: '/proventos',    label: 'Proventos',       Icon: Landmark },
   { to: '/equity-trades', label: 'Operaciones',     Icon: TrendingUp },
+  { to: '/simulacion',   label: 'Simulación',      Icon: LineChart },
+  { to: '/gastos',       label: 'Gastos',          Icon: Wallet },
   { to: '/transactions', label: 'Transacciones',   Icon: ArrowLeftRight },
   { to: '/import/international', label: 'Import Intl', Icon: Globe },
   { to: '/settings',     label: 'Configuración',   Icon: Settings2 },

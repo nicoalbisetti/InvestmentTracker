@@ -1,16 +1,52 @@
 import logging
-from datetime import date
+from datetime import date, timedelta
 from calendar import monthrange
+from typing import Optional
 
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models.equity_trade import EquityTrade
+from app.models.instrument import Instrument
 from app.models.monthly_position import MonthlyPosition
 from app.services.snapshot_sync import sync_snapshot_for_date
 
 logger = logging.getLogger(__name__)
+
+# Desactivado: el precio medio se edita a mano desde Posiciones
+# (PATCH /api/positions/{mp_id}/avg-price) y no debe pisarse al recalcular.
+RECALCULATE_AVG_PRICE = False
+
+
+def _get_monthly_rate(d: date, db: Session) -> Optional[float]:
+    from app.models.quote import Quote
+    month_start = date(d.year, d.month, 1)
+    q = db.query(Quote).filter(Quote.date == month_start).first()
+    return q.usd_brl if q and q.usd_brl else None
+
+
+def _fetch_month_end_price(instrument: Instrument, month_end: date) -> Optional[float]:
+    """Precio de cierre del instrumento en (o antes de) el último día del mes, vía Yahoo Finance."""
+    if not instrument or not instrument.ticker or not instrument.ticker.strip():
+        return None
+    if instrument.type not in ("accion", "fii"):
+        return None
+
+    ticker_raw = instrument.ticker.strip()
+    is_usd_ticker = instrument.location == "exterior" or instrument.currency == "USD"
+    symbol = ticker_raw if is_usd_ticker else f"{ticker_raw}.SA"
+
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(symbol).history(start=month_end - timedelta(days=7), end=month_end + timedelta(days=1))
+        if hist.empty:
+            return None
+        val = float(hist["Close"].iloc[-1])
+        return val if val > 0 else None
+    except Exception:
+        logger.warning("equity_recalculate: fallo fetch de precio para %s en %s", symbol, month_end)
+        return None
 
 
 def recalculate_equity_positions(instrument_id: int, from_date: date, db: Session) -> int:
@@ -20,6 +56,30 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
     """
     # 1. Normalizar al primer día del mes
     from_month = from_date.replace(day=1)
+
+    instrument = db.query(Instrument).filter(Instrument.id == instrument_id).first()
+    is_usd = instrument.currency == "USD" if instrument else False
+
+    # 1b. Asegurar que exista una fila de MonthlyPosition para cada mes desde
+    # from_month hasta el mes actual, para que una operación (nueva o vieja)
+    # siempre genere posición sin depender de un rolado manual previo.
+    today_month = date.today().replace(day=1)
+    end_month = max(from_month, today_month)
+    existing_dates = {
+        d for (d,) in db.query(MonthlyPosition.date)
+        .filter(
+            MonthlyPosition.instrument_id == instrument_id,
+            MonthlyPosition.date >= from_month,
+            MonthlyPosition.date <= end_month,
+        )
+        .all()
+    }
+    cursor = from_month
+    while cursor <= end_month:
+        if cursor not in existing_dates:
+            db.add(MonthlyPosition(instrument_id=instrument_id, date=cursor))
+        cursor += relativedelta(months=1)
+    db.flush()
 
     # 2. Obtener todas las MonthlyPosition >= from_month ordenadas ASC
     positions = (
@@ -87,11 +147,30 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
 
         # Actualizar MP
         mp.quantity = running_qty
-        mp.avg_price = running_avg if running_qty > 0 and running_avg > 0 else None
+        if RECALCULATE_AVG_PRICE:
+            mp.avg_price = running_avg if running_qty > 0 and running_avg > 0 else None
 
-        # Si hay unit_price, recalcular balance_brl
+        # Si la posición no tiene precio (p. ej. mes recién creado), buscar el
+        # precio de cierre: fin de mes para meses cerrados, precio del día para
+        # el mes en curso (todavía no tiene cierre de fin de mes en Yahoo).
+        if mp.unit_price is None and running_qty != 0:
+            today = date.today()
+            is_current_month = mp.date.year == today.year and mp.date.month == today.month
+            price_target_date = today if is_current_month else end_of_month
+            fetched_price = _fetch_month_end_price(instrument, price_target_date)
+            if fetched_price:
+                mp.unit_price = fetched_price
+
+        # Si hay unit_price, recalcular balance_brl / balance_usd
         if mp.unit_price is not None:
-            mp.balance_brl = round(running_qty * mp.unit_price, 2)
+            if is_usd:
+                rate = mp.usd_rate or _get_monthly_rate(mp.date, db)
+                mp.balance_usd = round(running_qty * mp.unit_price, 2)
+                if rate:
+                    mp.usd_rate = rate
+                    mp.balance_brl = round(running_qty * mp.unit_price * rate, 2)
+            else:
+                mp.balance_brl = round(running_qty * mp.unit_price, 2)
 
         # Calcular gain y gain_pct con Modified Dietz
         prev_month_date = mp.date - relativedelta(months=1)
@@ -104,10 +183,17 @@ def recalculate_equity_positions(instrument_id: int, from_date: date, db: Sessio
             .first()
         )
         if prev_mp and prev_mp.balance_brl and prev_mp.balance_brl > 0:
-            net_trade_flow = sum(
-                t.quantity * t.price if t.trade_type == "compra" else -(t.quantity * t.price)
-                for t in trades_of_month
-            )
+            if is_usd:
+                net_trade_flow = sum(
+                    (t.quantity * t.price * (t.usd_rate or 1.0) if t.trade_type == "compra"
+                     else -(t.quantity * t.price * (t.usd_rate or 1.0)))
+                    for t in trades_of_month
+                )
+            else:
+                net_trade_flow = sum(
+                    t.quantity * t.price if t.trade_type == "compra" else -(t.quantity * t.price)
+                    for t in trades_of_month
+                )
             mp.gain = (mp.balance_brl or 0) - (prev_mp.balance_brl or 0) - net_trade_flow
             adjusted_base = (prev_mp.balance_brl or 0) + net_trade_flow * 0.5
             if adjusted_base > 0:

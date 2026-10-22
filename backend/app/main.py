@@ -11,6 +11,8 @@ from app.routers import import_proventos
 from app.routers import equity_trades
 from app.routers import import_international
 from app.routers import ticker
+from app.routers import simulation
+from app.expenses.routers import router as expenses_router
 
 app = FastAPI(
     title="InvestmentTracker API",
@@ -38,14 +40,25 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 def startup():
-    from app.database import engine as main_engine, demo_engine, _migrate_provento_items, _migrate_return_source, _migrate_portfolio_snapshot_pk
+    from app.database import (
+        engine as main_engine, demo_engine,
+        _migrate_provento_items, _migrate_return_source,
+        _migrate_portfolio_snapshot_pk, _migrate_equity_trades_usd,
+        _migrate_provento_native_amounts,
+    )
     _migrate_provento_items(main_engine)
     _migrate_provento_items(demo_engine)
     _migrate_return_source(main_engine)
     _migrate_return_source(demo_engine)
     _migrate_portfolio_snapshot_pk(main_engine)
     _migrate_portfolio_snapshot_pk(demo_engine)
+    _migrate_equity_trades_usd(main_engine)
+    _migrate_equity_trades_usd(demo_engine)
+    _migrate_provento_native_amounts(main_engine)
+    _migrate_provento_native_amounts(demo_engine)
     create_tables()
+    from app.expenses.db import create_expense_tables
+    create_expense_tables()
 
 
 app.include_router(dashboard.router)
@@ -63,6 +76,8 @@ app.include_router(import_proventos.router)
 app.include_router(equity_trades.router)
 app.include_router(import_international.router)
 app.include_router(ticker.router)
+app.include_router(simulation.router)
+app.include_router(expenses_router)
 
 
 @app.get("/api/health")

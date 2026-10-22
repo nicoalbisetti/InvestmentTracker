@@ -257,7 +257,6 @@ function Step1({
 
 function Step2({
   preview,
-  forceOverwrite,
   fileToken,
   onConfirm,
   onBack,
@@ -517,7 +516,6 @@ function Step2({
 
 function Step3({
   result,
-  periodLabel,
   onRestart,
 }: {
   result: ImportResult;

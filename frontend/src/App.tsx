@@ -13,6 +13,8 @@ import ImportFixedIncome from './pages/ImportFixedIncome';
 import ImportProventos from './pages/ImportProventos';
 import ImportInternational from './pages/ImportInternational';
 import EquityTrades from './pages/EquityTrades';
+import SimulationPage from './pages/SimulationPage';
+import GastosPage from './pages/expenses/GastosPage';
 
 export default function App() {
   return (
@@ -32,6 +34,8 @@ export default function App() {
             <Route path="import/proventos" element={<ImportProventos />} />
             <Route path="import/international" element={<ImportInternational />} />
             <Route path="equity-trades" element={<EquityTrades />} />
+            <Route path="simulacion" element={<SimulationPage />} />
+            <Route path="gastos" element={<GastosPage />} />
           </Route>
         </Routes>
       </BrowserRouter>

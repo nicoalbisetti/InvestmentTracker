@@ -7,11 +7,13 @@ export interface EquityTradeOut {
   trade_type: 'compra' | 'venta';
   quantity: number;
   price: number;
+  usd_rate: number | null;
   amount_brl: number | null;
   notes: string | null;
   created_at: string;
   instrument_name: string;
   instrument_ticker: string | null;
+  instrument_currency: string;
 }
 
 export interface EquityTradeWithRecalc extends EquityTradeOut {
@@ -23,11 +25,14 @@ export interface EquityTradeSummary {
   instrument_id: number;
   instrument_name: string;
   instrument_ticker: string | null;
+  currency: string;
+  is_usd: boolean;
   total_compras_qty: number;
   total_ventas_qty: number;
   qty_actual: number;
   avg_price_compra: number | null;
   ultimo_precio: number | null;
+  usd_rate_last: number | null;
   pl_no_realizado: number | null;
   pl_no_realizado_pct: number | null;
 }
@@ -54,6 +59,7 @@ export interface EquityTradeCreate {
   trade_type: 'compra' | 'venta';
   quantity: number;
   price: number;
+  usd_rate?: number;
   notes?: string;
 }
 
@@ -62,6 +68,7 @@ export interface EquityTradeUpdate {
   trade_type?: 'compra' | 'venta';
   quantity?: number;
   price?: number;
+  usd_rate?: number;
   notes?: string;
 }
 

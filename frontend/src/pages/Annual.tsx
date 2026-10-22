@@ -4,7 +4,7 @@ import {
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { getAnnualGrowth, getMonthlyGrowth } from '../api/growth';
-import type { AnnualGrowthResponse, MonthlyGrowthResponse, MonthlyTransaction } from '../api/growth';
+import type { AnnualGrowthResponse, MonthlyGrowthResponse, MonthlyPoint, MonthlyTransaction } from '../api/growth';
 import { fmtBRL, fmtPct, MONTH_NAMES } from '../utils/formatters';
 
 const BLUE = '#378ADD';
@@ -109,29 +109,36 @@ function MonthlyTooltip({ active, payload, label, transactions }: any) {
           Valoriz. acum.: <span className="font-mono text-gray-900 dark:text-white">{fmtBRL(d.valorizacion_acum)}</span>
         </p>
       )}
-      <p className="text-gray-600 dark:text-gray-400">
-        Aportes netos acum.:{' '}
-        <span
-          className="font-mono"
-          style={{
-            color: (d.net_flow_acum ?? 0) > 0 ? BLUE : (d.net_flow_acum ?? 0) < 0 ? RED : GRAY,
-          }}
-        >
-          {fmtBRL(d.net_flow_acum ?? 0)}
-        </span>
-      </p>
+      {(d.net_flow ?? 0) !== 0 && (
+        <p className="text-gray-600 dark:text-gray-400">
+          Aportes netos:{' '}
+          <span
+            className="font-mono"
+            style={{
+              color: (d.net_flow ?? 0) > 0 ? BLUE : (d.net_flow ?? 0) < 0 ? RED : GRAY,
+            }}
+          >
+            {fmtBRL(d.net_flow ?? 0)}
+          </span>
+        </p>
+      )}
       {monthTxns.length > 0 && (
         <div className="mt-2 border-t border-gray-200 dark:border-gray-700 pt-2">
           <p className="text-xs text-gray-500 mb-1">Movimientos:</p>
-          {monthTxns.map((t, i) => (
-            <p key={i} className="text-xs">
-              <span className={t.type === 'aplicacion' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
-                {t.type === 'aplicacion' ? '+' : '-'}{fmtBRL(Math.abs(t.amount_brl))}
-              </span>
-              {' '}
-              <span className="text-gray-600 dark:text-gray-400">{t.instrument_name}</span>
-            </p>
-          ))}
+          {monthTxns.map((t, i) => {
+            const isPositive = ['aplicacion', 'compra'].includes(t.type);
+            return (
+              <p key={i} className="text-xs">
+                <span className={isPositive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                  {isPositive ? '+' : ''}{fmtBRL(t.amount_brl)}
+                </span>
+                {' '}
+                <span className="text-gray-500 dark:text-gray-500 italic text-[10px]">{t.type}</span>
+                {' '}
+                <span className="text-gray-600 dark:text-gray-400">{t.instrument_name}</span>
+              </p>
+            );
+          })}
         </div>
       )}
     </div>
