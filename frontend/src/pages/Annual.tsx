@@ -4,7 +4,7 @@ import {
   Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
 import { getAnnualGrowth, getMonthlyGrowth } from '../api/growth';
-import type { AnnualGrowthResponse, MonthlyGrowthResponse, MonthlyTransaction } from '../api/growth';
+import type { AnnualGrowthResponse, MonthlyGrowthResponse, MonthlyPoint, MonthlyTransaction } from '../api/growth';
 import { fmtBRL, fmtPct, MONTH_NAMES } from '../utils/formatters';
 
 const BLUE = '#378ADD';

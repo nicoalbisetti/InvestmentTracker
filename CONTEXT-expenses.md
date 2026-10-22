@@ -174,8 +174,9 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
 - Tests: `cd backend && python3 -m pytest tests` (pytest + httpx en `requirements-dev.txt`). Los tests con extractos
   reales se saltean si `docs/expenses/` o `tests/expenses/real_golden.json` no existen. Los PDF sintéticos se generan
   con `tests/expenses/pdf_builder.py`.
-- Frontend: lint de los archivos nuevos limpio; `npm run build`/`tsc -b` del repo ya fallaba **antes** del módulo
-  (52 errores TS en páginas de Inversiones: Annual, Positions, ImportFixedIncome, etc.).
+- Frontend: `cd frontend && npm run build` (tsc -b + vite build) pasa sin errores desde el 22 Oct 2026 (se corrigieron 52 errores
+  de tipos previos en páginas de Inversiones, sin cambios de comportamiento). El lint de los archivos del módulo está limpio;
+  el resto del repo conserva ~125 errores de lint históricos (`no-explicit-any`, etc.).
 
 ## 13. Pendientes y límites conocidos
 

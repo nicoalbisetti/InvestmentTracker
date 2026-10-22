@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ImportConfig, DiffItem, PreviewResponse, ImportResult, SuggestionItem,
@@ -386,7 +387,7 @@ function Step2({
   setPreview: (p: PreviewResponse) => void;
   config: ImportConfig;
   selectedKeys: Set<string>;
-  setSelectedKeys: (s: Set<string>) => void;
+  setSelectedKeys: Dispatch<SetStateAction<Set<string>>>;
   onConfirm: () => void;
   onBack: () => void;
   loading: boolean;
@@ -413,7 +414,7 @@ function Step2({
     setPage(1);
   };
 
-  const handleMapped = (codigo: string, custodianOverride: string | null, instrumentId: number, instrumentName: string) => {
+  const handleMapped = (codigo: string, custodianOverride: string | null, instrumentId: number, _instrumentName: string) => {
     // Update the diff item in local state: NEW → UPDATED, store instrument_id
     const updatedDiff = preview.differences.map(d => {
       if (d.codigo === codigo && d.custodian_override === custodianOverride) {

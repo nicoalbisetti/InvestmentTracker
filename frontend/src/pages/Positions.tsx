@@ -506,14 +506,14 @@ export default function Positions() {
                             if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
                             setEditing({ mpId, instrumentId: row.id, field: 'balance_brl', value: String(row.balance_brl ?? '') });
                           }}>
-                          {editing?.instrumentId === row.id && editing.field === 'balance_brl' ? (
+                          {editing && editing.instrumentId === row.id && editing.field === 'balance_brl' ? (
                             <input
                               autoFocus
                               className="w-28 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
                               value={editing.value}
                               onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
-                              onBlur={() => saveBalance(editing.mpId, editing.field, editing.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, editing.field, editing.value); if (e.key === 'Escape') setEditing(null); }}
+                              onBlur={() => saveBalance(editing.mpId, 'balance_brl', editing.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, 'balance_brl', editing.value); if (e.key === 'Escape') setEditing(null); }}
                             />
                           ) : (
                             <span className="group-hover:underline decoration-dotted">
@@ -527,14 +527,14 @@ export default function Positions() {
                             if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
                             setEditing({ mpId, instrumentId: row.id, field: 'balance_usd', value: String(row.balance_usd ?? '') });
                           }}>
-                          {editing?.instrumentId === row.id && editing.field === 'balance_usd' ? (
+                          {editing && editing.instrumentId === row.id && editing.field === 'balance_usd' ? (
                             <input
                               autoFocus
                               className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
                               value={editing.value}
                               onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
-                              onBlur={() => saveBalance(editing.mpId, editing.field, editing.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, editing.field, editing.value); if (e.key === 'Escape') setEditing(null); }}
+                              onBlur={() => saveBalance(editing.mpId, 'balance_usd', editing.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, 'balance_usd', editing.value); if (e.key === 'Escape') setEditing(null); }}
                             />
                           ) : (
                             <span className="group-hover:underline decoration-dotted">
@@ -563,14 +563,14 @@ export default function Positions() {
                             if (!mpId) mpId = await ensureMonthPosition(row.id, priceMonth);
                             setEditing({ mpId, instrumentId: row.id, field: 'quantity', value: String(row.quantity ?? '') });
                           }}>
-                          {editing?.instrumentId === row.id && editing.field === 'quantity' ? (
+                          {editing && editing.instrumentId === row.id && editing.field === 'quantity' ? (
                             <input
                               autoFocus
                               className="w-20 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
                               value={editing.value}
                               onChange={e => setEditing(ed => ed ? { ...ed, value: e.target.value } : ed)}
-                              onBlur={() => saveBalance(editing.mpId, editing.field, editing.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, editing.field, editing.value); if (e.key === 'Escape') setEditing(null); }}
+                              onBlur={() => saveBalance(editing.mpId, 'quantity', editing.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') saveBalance(editing.mpId, 'quantity', editing.value); if (e.key === 'Escape') setEditing(null); }}
                             />
                           ) : (
                             <span className="group-hover:underline decoration-dotted">
@@ -591,7 +591,7 @@ export default function Positions() {
                             setEditing({ mpId, instrumentId: row.id, field: 'unit_price', value: String(row.unit_price ?? '') });
                           }}
                         >
-                          {editing?.instrumentId === row.id && editing.field === 'unit_price' ? (
+                          {editing && editing.instrumentId === row.id && editing.field === 'unit_price' ? (
                             <input
                               autoFocus
                               className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"
@@ -622,7 +622,7 @@ export default function Positions() {
                             setEditing({ mpId, instrumentId: row.id, field: 'avg_price', value: String(row.avg_price ?? '') });
                           }}
                         >
-                          {editing?.instrumentId === row.id && editing.field === 'avg_price' ? (
+                          {editing && editing.instrumentId === row.id && editing.field === 'avg_price' ? (
                             <input
                               autoFocus
                               className="w-24 px-1 py-0.5 text-sm border border-blue-400 rounded font-mono"

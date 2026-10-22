@@ -40,7 +40,7 @@ export default function BenchmarkChart({ data, showCdi, showIpca, showUsd = fals
           width={60}
         />
         <Tooltip
-          formatter={(val: any, name: string) => [fmtPctReturn(val), name]}
+          formatter={(val: any, name: any) => [fmtPctReturn(val), name]}
           labelFormatter={label => { const [y, m] = label.split('-'); return `${m}/${y}`; }}
           contentStyle={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, fontSize: 12, boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}
         />
