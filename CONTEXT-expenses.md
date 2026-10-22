@@ -41,7 +41,7 @@ cuentas y con Inversiones/Proventos, y muestra gasto por categoría, mes y entid
 | `exp_import_batches` | `account_id`, `file_label`, `file_hash` (UNIQUE con `account_id`), `parser_key`, `period_start/end`, `statement_due_date`, `statement_period` (YYYY-MM), `statement_totals` (JSON por moneda), `validation` (JSON de checks), `preview_rows` (JSON mientras `status=preview`), `status` (preview\|confirmed\|discarded) |
 | `exp_categories` | `name` (UNIQUE), `is_system`. Sistema: "Tarjeta sin detalle", "Sin clasificar" |
 | `exp_transactions` | `account_id`, `batch_id`, `date` (imputación), `purchase_date`, `statement_period`, `description_raw`, `counterparty`, `merchant_normalized`, `external_id`, `amount` (con signo), `currency`, `fx_usd_brl`, `fx_ars_usd`, `fx_estimated`, `amount_brl`, `amount_usd`, `kind`, `category_id`, `entity_id`, `installment_number/total`, `classification_source` (own_account\|rule\|manual\|default), `rule_id`, `needs_review`, `transfer_group_id`, `statement_batch_id`, `dedup_hash` (UNIQUE) |
-| `exp_rules` | `priority`, `account_id`, `field`, `pattern` (regex i), `amount_sign`, `set_kind`, `set_category_id`, `set_entity_id`, `origin` (seed\|manual), `seed_key` |
+| `exp_rules` | `priority`, `account_id`, `field`, `pattern` (regex i), `amount_sign`, `set_kind`, `set_category_id`, `set_entity_id`, `set_needs_review` (clasifica pero deja la fila en revisión), `origin` (seed\|manual), `seed_key` |
 | `exp_links` | Vínculos **hacia Inversiones**: `exp_transaction_id`, `target_type` (investment_transaction\|provento_item), `target_id`, `link_type`, `amount_allocated_brl`, `status` (suggested\|confirmed\|rejected), `score`, y snapshot `target_date/target_amount/target_label` |
 | `exp_fx_rates` | PK `(date, pair)`: `USDBRL_PTAX`, `USDARS_MEP`; `rate`, `source` (ptax\|argentinadatos\|manual) |
 
@@ -143,6 +143,9 @@ PTAX venta (BCB Olinda; sólo días hábiles → día anterior) y MEP venta (arg
 | POST | `/links/{id}/confirm`, `/links/{id}/reject` | |
 | GET | `/audit/investments?from&to` | Auditoría de sólo lectura |
 | GET/POST | `/rules`, `/rules/preview` | Reglas; vista previa de impacto; alta con `apply_to_pending` |
+| POST | `/rules/reapply` | Pasa los pendientes (no manuales) por las reglas vigentes |
+| GET | `/review/merchant-groups` | Pendientes agrupados por comercio y signo, de mayor a menor monto |
+| POST | `/review/merchant-groups/apply` | `{items:[{key, sign, kind, category_id?, entity_id?}]}`: una regla anclada por comercio, aplicada a sus filas pendientes |
 | GET/POST | `/categories`; GET `/entities` | |
 | PUT/GET | `/fx/rates`; POST `/fx/recompute` | Tipos de cambio manuales / recálculo por rango |
 | POST | `/demo/regenerate` | Regenera los datos ficticios de la base **demo** (ignora el header) |
@@ -151,7 +154,7 @@ PTAX venta (BCB Olinda; sólo días hábiles → día anterior) y MEP venta (arg
 
 `src/pages/expenses/GastosPage.tsx` con pestañas por `?tab=`: **Resumen** (KPIs, barras apiladas categoría × mes,
 tabla, filtros, cobertura), **Movimientos** (filtros, edición inline, selección múltiple + edición masiva, "crear regla"
-con confirmación del impacto), **Revisar** (cola por motivo, vincular pares, confirmar/rechazar vínculos con Inversiones,
+con confirmación del impacto), **Revisar** (comercios sin clasificar agrupados con "crear N reglas", cola por motivo, vincular pares, confirmar/rechazar vínculos con Inversiones,
 auditoría), **Importar** (wizard + historial con borrado), **Configuración** (cuentas e identificadores propios).
 Código: `src/components/expenses/*`, `src/api/expenses.ts`, `src/utils/expenses.ts`. Ítem "Gastos" en `Sidebar.tsx`
 y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
@@ -164,7 +167,9 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
   BR: XP cuenta/tarjeta, Inter cuenta/tarjeta sin extractos, Santander BR y Bradesco sin extractos) y los 41 archivos de
   `docs/expenses/` ⇒ 2.238 movimientos. Clasificado automático: XP cuenta 95 %, Inter 100 %, tarjeta XP 41 % (87 % por
   monto), Santander cuenta 23 %, Mercado Pago 58 %; total 52 % de filas / 87 % por monto. El resto se resuelve con
-  "crear regla". Las métricas son in-sample (las reglas se escribieron mirando estos archivos).
+  "crear regla". Las métricas son in-sample (las reglas se escribieron mirando estos archivos). Con las reglas genéricas
+  agregadas el 22 Oct (derivadas sólo de ene–jun) quedó 56 % de filas clasificadas; en jul–sep (fuera de muestra) resolvieron 11 de 79
+  pendientes. Lo que falta son sobre todo transferencias a personas (AR), que requieren tu criterio.
 - Tests: `cd backend && python3 -m pytest tests` (pytest + httpx en `requirements-dev.txt`). Los tests con extractos
   reales se saltean si `docs/expenses/` o `tests/expenses/real_golden.json` no existen. Los PDF sintéticos se generan
   con `tests/expenses/pdf_builder.py`.
@@ -177,7 +182,6 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
   auditoría las lista como "sin transacción" (43 aportes).
 - Transferencias propias hacia cuentas no importadas (Santander BR, Bradesco, cuenta de inversión) quedan como "sin par";
   no hay forma de indicar la cuenta de destino (idea: `counterparty_account_id` por regla).
-- Una regla no puede marcar `needs_review` (p. ej. entidad de VIVO/Telefónica a confirmar).
 - Sección de dólares de la cuenta Santander AR y AMEX con USD sólo cubiertas por PDF sintéticos (los extractos reales
   no traen movimientos en esos casos).
 - No implementado de la spec: `installments/upcoming`, combobox con búsqueda, edición de reglas/TC en la UI, drag de

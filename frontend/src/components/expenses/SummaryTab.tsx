@@ -36,8 +36,17 @@ export default function SummaryTab() {
     return Object.keys(tot).sort((a, b) => tot[b] - tot[a]);
   }, [months]);
   const chartData = months.map(m => ({ month: monthLabel(m.month), ...m.by_category }));
-  const last = months[months.length - 1];
-  const lastSix = months.slice(-6);
+  // Mes de referencia de los KPIs: el último mes con extracto de TODAS las cuentas que tienen datos
+  // (si no, un mes con una cuenta sin importar parecería un mes de poco gasto).
+  const ref = useMemo(() => {
+    const cov = (data?.coverage ?? []).filter(c => c.months.length > 0);
+    const full = months.filter(m => cov.every(c => c.months.includes(m.month)));
+    return full.length ? full[full.length - 1] : months[months.length - 1];
+  }, [months, data]);
+  const last = ref;
+  const refIdx = ref ? months.findIndex(m => m.month === ref.month) : -1;
+  const partial = !!ref && refIdx !== months.length - 1;
+  const lastSix = months.slice(Math.max(0, refIdx - 5), refIdx + 1);
   const avg6 = lastSix.length ? lastSix.reduce((s, m) => s + m.expenses, 0) / lastSix.length : 0;
   const money = (v: number | null | undefined) => fmtMoney(v, cur);
   const set = (k: string, v: string) => setFilters(f => ({ ...f, [k]: v }));
@@ -76,7 +85,8 @@ export default function SummaryTab() {
       {error && <div className="card text-rose-500 text-sm">{error}</div>}
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <KpiCard loading={loading} title={`Gasto ${last ? monthLabel(last.month) : ''}`} value={money(last?.expenses)} />
+        <KpiCard loading={loading} title={`Gasto ${last ? monthLabel(last.month) : ''}`} value={money(last?.expenses)}
+          subtitle={partial ? 'último mes con todos los extractos' : undefined} />
         <KpiCard loading={loading} title="Promedio 6 meses" value={money(avg6)} />
         <KpiCard loading={loading} title="Ingresos" value={money(last?.income)} subtitle={last && last.proventos ? `+ proventos ${money(last.proventos)}` : undefined} />
         <KpiCard loading={loading} title="Ahorro" value={money(last?.savings)} />
@@ -100,7 +110,7 @@ export default function SummaryTab() {
                 tickFormatter={(v: number) => (v >= 1e3 ? `${(v / 1e3).toFixed(0)}k` : String(v))} />
               <Tooltip formatter={(v, n) => [money(Number(v)), String(n)]} contentStyle={{ borderRadius: 8, fontSize: 12 }} />
               <Legend iconSize={10} formatter={v => <span style={{ fontSize: 12, color: '#6b7280' }}>{v}</span>} />
-              {categories.map(c => <Bar key={c} dataKey={c} stackId="a" fill={categoryColor(c, categories)} />)}
+              {categories.map(c => <Bar key={c} dataKey={c} stackId="a" fill={categoryColor(c, categories)} isAnimationActive={false} />)}
             </BarChart>
           </ResponsiveContainer>
         )}

@@ -33,3 +33,6 @@ export function monthLabel(ym: string): string {
   const [y, m] = ym.split('-');
   return `${['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'][+m - 1]} ${y.slice(2)}`;
 }
+
+export const ACCOUNT_KIND_LABELS: Record<string, string> = { bank: 'Banco', wallet: 'Billetera', credit_card: 'Tarjeta de crédito' };
+export const BATCH_STATUS_LABELS: Record<string, string> = { preview: 'Preview', confirmed: 'Importado', discarded: 'Descartado' };

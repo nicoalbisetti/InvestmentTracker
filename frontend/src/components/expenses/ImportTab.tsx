@@ -3,7 +3,7 @@ import {
   apiErrorDetail, Batch, confirmImport, deleteImport, ExpAccount, getAccounts, getCategories, getImports, uploadImport, ExpCategory,
 } from '../../api/expenses';
 import { fmtDate } from '../../utils/formatters';
-import { fmtMoney, KIND_LABELS, PARSER_LABELS } from '../../utils/expenses';
+import { BATCH_STATUS_LABELS, fmtMoney, KIND_LABELS, PARSER_LABELS } from '../../utils/expenses';
 
 interface Need { message: string; candidates?: { id: number; name: string }[]; needsDueDate?: boolean }
 
@@ -165,7 +165,7 @@ export default function ImportTab() {
                   <td className="px-3 py-2">{PARSER_LABELS[b.parser_key] ?? b.parser_key}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{b.statement_period ?? `${fmtDate(b.period_start)} → ${fmtDate(b.period_end)}`}</td>
                   <td className="px-3 py-2">{b.rows_new}</td><td className="px-3 py-2">{b.rows_duplicate}</td>
-                  <td className="px-3 py-2"><span className={`badge ${b.status === 'confirmed' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{b.status}</span></td>
+                  <td className="px-3 py-2"><span className={`badge ${b.status === 'confirmed' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{BATCH_STATUS_LABELS[b.status] ?? b.status}</span></td>
                   <td className="px-3 py-2"><button className="text-red-400 hover:text-red-600 text-xs" onClick={() => removeBatch(b)}>Borrar</button></td>
                 </tr>
               ))}

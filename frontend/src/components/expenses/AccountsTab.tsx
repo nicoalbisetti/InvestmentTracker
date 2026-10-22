@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiErrorDetail, createAccount, ExpAccount, getAccount, getAccounts, patchAccount } from '../../api/expenses';
-import { PARSER_LABELS } from '../../utils/expenses';
+import { ACCOUNT_KIND_LABELS, PARSER_LABELS } from '../../utils/expenses';
 
 const EMPTY = {
   name: '', institution: '', country: 'BR', kind: 'bank', currency: 'BRL', parser_key: '',
@@ -93,7 +93,7 @@ export default function AccountsTab() {
               accounts.map(a => (
                 <tr key={a.id}>
                   <td className="px-3 py-2 font-medium">{a.name}</td><td className="px-3 py-2">{a.institution}</td><td className="px-3 py-2">{a.country}</td>
-                  <td className="px-3 py-2">{a.kind}</td><td className="px-3 py-2">{a.currency}</td>
+                  <td className="px-3 py-2">{ACCOUNT_KIND_LABELS[a.kind] ?? a.kind}</td><td className="px-3 py-2">{a.currency}</td>
                   <td className="px-3 py-2">{a.parser_key ? PARSER_LABELS[a.parser_key] ?? a.parser_key : '—'}</td>
                   <td className="px-3 py-2">{accounts.find(x => x.id === a.paid_from_account_id)?.name ?? '—'}</td>
                   <td className="px-3 py-2">{a.has_statements ? 'sí' : 'no'}</td>
