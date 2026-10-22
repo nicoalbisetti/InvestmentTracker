@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   applyMerchantGroups, ExpCategory, ExpEntity, getCategories, getEntities, getMerchantGroups, MerchantGroup, reapplyRules,
 } from '../../api/expenses';
+import Combobox from './Combobox';
 import { fmtMoney, KIND_LABELS } from '../../utils/expenses';
 
 interface Choice { kind: string; category_id: string; entity_id: string; selected: boolean }
@@ -23,6 +24,9 @@ export default function MerchantGroups({ onChanged }: { onChanged: () => void })
     choice[groupId(g)] ?? { kind: g.sign === 'negative' ? 'expense' : 'income', category_id: '', entity_id: '', selected: false };
   const set = (g: MerchantGroup, patch: Partial<Choice>) =>
     setChoice(c => ({ ...c, [groupId(g)]: { ...get(g), ...patch } }));
+
+  const catOptions = cats.map(x => ({ value: String(x.id), label: x.name }));
+  const entOptions = ents.map(x => ({ value: String(x.id), label: x.name }));
 
   const chosen = groups.filter(g => get(g).selected && (get(g).category_id || get(g).kind !== 'expense'));
 
@@ -71,10 +75,10 @@ export default function MerchantGroups({ onChanged }: { onChanged: () => void })
                     <td className="px-2 py-1 font-mono text-right whitespace-nowrap">{fmtMoney(g.total_brl)}</td>
                     <td className="px-2 py-1"><select className="input text-xs py-0.5" value={c.kind} onChange={e => set(g, { kind: e.target.value, selected: true })}>
                       {Object.entries(KIND_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></td>
-                    <td className="px-2 py-1"><select className="input text-xs py-0.5" value={c.category_id} onChange={e => set(g, { category_id: e.target.value, selected: !!e.target.value })}>
-                      <option value="">—</option>{cats.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
-                    <td className="px-2 py-1"><select className="input text-xs py-0.5" value={c.entity_id} onChange={e => set(g, { entity_id: e.target.value })}>
-                      <option value="">—</option>{ents.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select></td>
+                    <td className="px-2 py-1"><Combobox options={catOptions} value={c.category_id} placeholder="—" className="min-w-[160px]"
+                      onChange={v => set(g, { category_id: v, selected: !!v })} /></td>
+                    <td className="px-2 py-1"><Combobox options={entOptions} value={c.entity_id} placeholder="—" className="min-w-[110px]"
+                      onChange={v => set(g, { entity_id: v })} /></td>
                   </tr>);
               })}
             </tbody>

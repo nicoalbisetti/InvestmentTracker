@@ -3,7 +3,7 @@ import SummaryTab from '../../components/expenses/SummaryTab';
 import MovementsTab from '../../components/expenses/MovementsTab';
 import ImportTab from '../../components/expenses/ImportTab';
 import ReviewTab from '../../components/expenses/ReviewTab';
-import AccountsTab from '../../components/expenses/AccountsTab';
+import ConfigTab from '../../components/expenses/ConfigTab';
 
 const TABS = [
   { id: 'resumen', label: 'Resumen' },
@@ -33,7 +33,7 @@ export default function GastosPage() {
       {tab === 'movimientos' && <MovementsTab />}
       {tab === 'revisar' && <ReviewTab />}
       {tab === 'importar' && <ImportTab />}
-      {tab === 'config' && <AccountsTab />}
+      {tab === 'config' && <ConfigTab />}
     </div>
   );
 }

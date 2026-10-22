@@ -11,6 +11,7 @@ from app.expenses.services.classifier import Classifier, sign_inconsistent
 from app.expenses.services.normalize import match_key
 
 SEED_DIR = pathlib.Path(__file__).resolve().parent.parent / "seed"
+EXAMPLE_RULES = SEED_DIR / "rules.example.json"   # sin nombres reales: es lo único que ve el entorno demo
 
 
 def load_seed_rules(db: Session, path: Optional[pathlib.Path] = None) -> int:

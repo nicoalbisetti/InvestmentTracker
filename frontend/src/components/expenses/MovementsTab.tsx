@@ -4,6 +4,7 @@ import {
   bulkPatch, getAccounts, getCategories, getEntities, getTransactions, patchTransaction, previewRule,
   ExpAccount, ExpCategory, ExpEntity, ExpTx,
 } from '../../api/expenses';
+import Combobox from './Combobox';
 import { fmtDate } from '../../utils/formatters';
 import { fmtMoney, KIND_LABELS, matchKey } from '../../utils/expenses';
 
@@ -49,6 +50,8 @@ export default function MovementsTab() {
   const setFilter = (k: string, v: string | boolean) => { setFilters(f => ({ ...f, [k]: v })); setPage(1); setSelected(new Set()); };
   const pages = Math.max(1, Math.ceil(data.total / PAGE_SIZE));
   const entId = (code: string | null) => entities.find(e => e.code === code)?.id ?? '';
+  const catOptions = categories.map(c => ({ value: String(c.id), label: c.name }));
+  const entOptions = entities.map(e => ({ value: String(e.id), label: e.name }));
 
   const edit = async (t: ExpTx, change: { kind?: string; category_id?: number | null; entity_id?: number | null; counterparty_account_id?: number | null }) => {
     const body: Record<string, unknown> = { ...change };
@@ -81,7 +84,8 @@ export default function MovementsTab() {
       <div className="card p-3 space-y-2">
         <div className="flex flex-wrap gap-2 items-end">
           <Sel label="Tipo" value={filters.kind} onChange={v => setFilter('kind', v)} options={Object.entries(KIND_LABELS).map(([v, l]) => [v, l])} />
-          <Sel label="Categoría" value={filters.category_id} onChange={v => setFilter('category_id', v)} options={categories.map(c => [String(c.id), c.name])} />
+          <div className="flex flex-col gap-1 min-w-[170px]"><label className="text-xs font-medium text-gray-500">Categoría</label>
+            <Combobox options={catOptions} value={filters.category_id} onChange={v => setFilter('category_id', v)} clearLabel="Todas" className="[&_input]:text-sm [&_input]:py-1.5" /></div>
           <Sel label="Entidad" value={filters.entity} onChange={v => setFilter('entity', v)} options={entities.map(e => [e.code, e.name])} />
           <Sel label="Cuenta" value={filters.account_id} onChange={v => setFilter('account_id', v)} options={accounts.map(a => [String(a.id), a.name])} />
           <Sel label="País" value={filters.country} onChange={v => setFilter('country', v)} options={[['BR', 'Brasil'], ['AR', 'Argentina']]} />
@@ -105,7 +109,8 @@ export default function MovementsTab() {
         <div className="card p-3 flex flex-wrap gap-2 items-end bg-indigo-50 dark:bg-indigo-900/20">
           <span className="text-sm font-medium pb-1.5">{selected.size} seleccionado(s)</span>
           <Sel label="Tipo" value={bulk.kind} onChange={v => setBulk(b => ({ ...b, kind: v }))} options={Object.entries(KIND_LABELS)} blank="Sin cambio" />
-          <Sel label="Categoría" value={bulk.category_id} onChange={v => setBulk(b => ({ ...b, category_id: v }))} options={categories.map(c => [String(c.id), c.name])} blank="Sin cambio" />
+          <div className="flex flex-col gap-1 min-w-[170px]"><label className="text-xs font-medium text-gray-500">Categoría</label>
+            <Combobox options={catOptions} value={bulk.category_id} onChange={v => setBulk(b => ({ ...b, category_id: v }))} clearLabel="Sin cambio" className="[&_input]:text-sm [&_input]:py-1.5" /></div>
           <Sel label="Entidad" value={bulk.entity_id} onChange={v => setBulk(b => ({ ...b, entity_id: v }))} options={entities.map(e => [String(e.id), e.name])} blank="Sin cambio" />
           <button className="btn-primary text-sm py-1.5" onClick={applyBulk}>Aplicar</button>
           <button className="btn-secondary text-sm py-1.5" onClick={() => setSelected(new Set())}>Cancelar</button>
@@ -152,17 +157,13 @@ export default function MovementsTab() {
                       {accounts.filter(a => a.id !== t.account_id).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                     </select>
                   ) : (
-                    <select className="input text-xs py-1" value={t.category_id ?? ''} onChange={e => e.target.value && edit(t, { category_id: Number(e.target.value) })}>
-                      <option value="">—</option>
-                      {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                    </select>
+                    <Combobox options={catOptions} value={t.category_id ? String(t.category_id) : ''} placeholder="—" className="min-w-[150px]"
+                      onChange={v => v && edit(t, { category_id: Number(v) })} />
                   )}
                 </td>
                 <td className="px-3 py-2">
-                  <select className="input text-xs py-1" value={entId(t.entity)} onChange={e => e.target.value && edit(t, { entity_id: Number(e.target.value) })}>
-                    <option value="">—</option>
-                    {entities.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </select>
+                  <Combobox options={entOptions} value={entId(t.entity) === '' ? '' : String(entId(t.entity))} placeholder="—" className="min-w-[110px]"
+                    onChange={v => v && edit(t, { entity_id: Number(v) })} />
                 </td>
               </tr>
             ))}

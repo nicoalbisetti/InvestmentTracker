@@ -4,6 +4,7 @@ import {
 } from 'recharts';
 import { getEntities, getSummary, ExpEntity, Summary, SummaryBlock } from '../../api/expenses';
 import KpiCard from '../ui/KpiCard';
+import InstallmentsBlock from './InstallmentsBlock';
 import { categoryColor, fmtMoney, monthLabel } from '../../utils/expenses';
 
 export default function SummaryTab() {
@@ -148,6 +149,8 @@ export default function SummaryTab() {
           </table>
         </div>
       )}
+
+      <InstallmentsBlock />
 
       {data && data.coverage.length > 0 && <Coverage coverage={data.coverage} />}
     </div>
