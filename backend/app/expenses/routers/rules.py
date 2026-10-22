@@ -23,6 +23,7 @@ class RuleIn(BaseModel):
     set_category_id: Optional[int] = None
     set_entity_id: Optional[int] = None
     set_merchant: Optional[str] = None
+    set_needs_review: bool = False
     apply_to_pending: bool = False
 
 
@@ -42,7 +43,7 @@ def _validate(body: RuleIn):
 def _out(r: ExpRule) -> dict:
     return {c: getattr(r, c) for c in (
         "id", "priority", "account_id", "field", "pattern", "amount_sign", "set_kind",
-        "set_category_id", "set_entity_id", "set_merchant", "active", "origin")}
+        "set_category_id", "set_entity_id", "set_merchant", "set_needs_review", "active", "origin")}
 
 
 @router.get("")
@@ -66,3 +67,9 @@ def create_rule(body: RuleIn, db: Session = Depends(get_exp_db)):
     db.add(r); db.commit()
     applied = rules_svc.apply_rule_to_pending(db, r) if body.apply_to_pending else 0
     return {**_out(r), "applied": applied}
+
+
+@router.post("/reapply")
+def reapply_rules(db: Session = Depends(get_exp_db)):
+    """Pasa las filas pendientes por las reglas vigentes (útil después de editar o recargar reglas)."""
+    return rules_svc.reclassify_pending(db)

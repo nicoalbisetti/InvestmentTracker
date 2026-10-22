@@ -4,6 +4,7 @@ import {
   Audit, confirmLink, confirmPair, getAudit, getLinkSuggestions, getReviewQueueTyped, LinkSuggestion, QueueItem,
   rebuildLinks, rejectLink, ReviewQueue,
 } from '../../api/expenses';
+import MerchantGroups from './MerchantGroups';
 import { fmtDate } from '../../utils/formatters';
 import { fmtMoney } from '../../utils/expenses';
 
@@ -74,8 +75,8 @@ export default function ReviewTab() {
       </div>
 
       <Section title="Sin clasificar" count={q.unclassified.length} open hint="se resuelven en Movimientos (con 'crear regla')">
-        <p className="text-sm mb-2"><Link className="text-indigo-500 underline" to="/gastos?tab=movimientos&pending=1">Ver en Movimientos →</Link></p>
-        <ItemsTable items={q.unclassified} />
+        <MerchantGroups onChanged={load} />
+        <p className="text-sm mb-2"><Link className="text-indigo-500 underline" to="/gastos?tab=movimientos&pending=1">Ver fila por fila en Movimientos →</Link></p>
       </Section>
 
       <Section title="Pares de transferencias sugeridos" count={q.pair_suggestions.length} open hint="mismo importe, otra cuenta, a más de 1 día o ambiguos">

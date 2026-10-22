@@ -183,7 +183,8 @@
   "pattern": "VIVO SP|Telefonica Brasil",
   "amount_sign": "any",
   "kind": "expense",
-  "category": "Servicios"
+  "category": "Servicios",
+  "needs_review": true
  },
  {
   "seed_key": "br_cargos_fin",
@@ -439,5 +440,113 @@
   "amount_sign": "positive",
   "priority": 500,
   "field": "description_raw"
+ },
+ {
+  "seed_key": "ar_arba",
+  "priority": 510,
+  "field": "description_raw",
+  "pattern": "^Pago de servicios Arba",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_afip_vep",
+  "priority": 520,
+  "field": "description_raw",
+  "pattern": "AFIP\\s*VEP",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_municipal",
+  "priority": 530,
+  "field": "description_raw",
+  "pattern": "^Pago de servicios Gral puey",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Impuestos"
+ },
+ {
+  "seed_key": "ar_educacion",
+  "priority": 540,
+  "field": "description_raw",
+  "pattern": "(Pago de servicios (Universidad|Pagos educ)|colegio)",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Educación"
+ },
+ {
+  "seed_key": "ar_toyota_plan",
+  "priority": 550,
+  "field": "description_raw",
+  "pattern": "Pago de servicios?.*Toyota",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Auto"
+ },
+ {
+  "seed_key": "ar_extraccion",
+  "priority": 560,
+  "field": "description_raw",
+  "pattern": "^Extraccion",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Efectivo"
+ },
+ {
+  "seed_key": "gen_entradas",
+  "priority": 570,
+  "field": "merchant_normalized",
+  "pattern": "EVENTIM|TICKETEK|PASSLINE|DALEPLAY",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Ocio y entretenimiento"
+ },
+ {
+  "seed_key": "gen_ropa",
+  "priority": 580,
+  "field": "merchant_normalized",
+  "pattern": "INDITEX|ADIDAS|NIKE|ZARA|RENNER",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Ropa y calzado"
+ },
+ {
+  "seed_key": "gen_autos_alquiler",
+  "priority": 590,
+  "field": "merchant_normalized",
+  "pattern": "LOCALIZA|UNIDAS|HERTZ|MOVIDA",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Viajes"
+ },
+ {
+  "seed_key": "gen_viajes",
+  "priority": 600,
+  "field": "merchant_normalized",
+  "pattern": "SKYAIRLINE|JETSMART|FLYBONDI|BOOKING|AIRBNB|DESPEGAR",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Viajes"
+ },
+ {
+  "seed_key": "gen_super_ar",
+  "priority": 610,
+  "field": "merchant_normalized",
+  "pattern": "COTO|CENCOSUD|JUMBO|CHANGOMAS|CARREFOUR",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Supermercado"
+ },
+ {
+  "seed_key": "gen_farmacia",
+  "priority": 620,
+  "field": "merchant_normalized",
+  "pattern": "^FARMACIA|FARMACITY|DROGARIA|DROGASIL",
+  "amount_sign": "negative",
+  "kind": "expense",
+  "category": "Salud y farmacia"
  }
 ]

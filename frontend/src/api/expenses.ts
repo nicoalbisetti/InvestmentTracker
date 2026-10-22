@@ -102,3 +102,15 @@ export const confirmPair = (outId: number, inId: number) =>
   client.post(`${B}/links/pairs`, { out_id: outId, in_id: inId }).then(r => r.data);
 export const getAudit = (from?: string, to?: string): Promise<Audit> =>
   client.get(`${B}/audit/investments`, { params: { from: from || undefined, to: to || undefined } }).then(r => r.data);
+
+export interface MerchantGroup {
+  key: string; sign: 'positive' | 'negative'; merchant: string; count: number; total_brl: number;
+  first: string; last: string; countries: string[]; sample: string[];
+}
+export interface GroupRuleInput { key: string; sign: string; kind: string; category_id?: number; entity_id?: number; needs_review?: boolean }
+export const getMerchantGroups = (limit = 100): Promise<MerchantGroup[]> =>
+  client.get(`${B}/review/merchant-groups`, { params: { limit } }).then(r => r.data);
+export const applyMerchantGroups = (items: GroupRuleInput[]): Promise<{ key: string; rule_id: number; applied: number }[]> =>
+  client.post(`${B}/review/merchant-groups/apply`, { items }).then(r => r.data);
+export const reapplyRules = (): Promise<{ reclassified: number; resolved: number }> =>
+  client.post(`${B}/rules/reapply`).then(r => r.data);

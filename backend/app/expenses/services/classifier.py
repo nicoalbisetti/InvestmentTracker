@@ -66,7 +66,7 @@ class Classifier:
                 kind = _sign_adjust(r.set_kind, amount)
                 return self._finish(Classification(
                     kind, r.set_category_id, r.set_entity_id, r.set_merchant or merchant,
-                    "rule", r.id), amount)
+                    "rule", r.id, bool(r.set_needs_review)), amount)
 
         if kind_hint:
             return self._finish(Classification(kind_hint, merchant_normalized=merchant,

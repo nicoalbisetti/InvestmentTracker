@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.expenses.db import get_exp_db
 from app.expenses.models import ExpCategory, ExpEntity, ExpTransaction
-from app.expenses.services import fx, linking, review, summary as summary_svc
+from app.expenses.services import fx, linking, merchants, review, summary as summary_svc
 
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
@@ -126,3 +126,30 @@ def create_category(body: CategoryIn, db: Session = Depends(get_exp_db)):
 @router.get("/entities")
 def list_entities(db: Session = Depends(get_exp_db)):
     return [{"id": e.id, "code": e.code, "name": e.name, "active": e.active} for e in db.query(ExpEntity)]
+
+
+@router.get("/review/merchant-groups")
+def merchant_groups(limit: int = Query(200, ge=1, le=1000), db: Session = Depends(get_exp_db)):
+    """Pendientes agrupados por comercio, de mayor a menor monto."""
+    return merchants.pending_groups(db, limit)
+
+
+class GroupRule(BaseModel):
+    key: str
+    sign: str = "any"
+    kind: str
+    category_id: Optional[int] = None
+    entity_id: Optional[int] = None
+    needs_review: bool = False
+
+
+class GroupApply(BaseModel):
+    items: list[GroupRule]
+
+
+@router.post("/review/merchant-groups/apply")
+def apply_merchant_groups(body: GroupApply, db: Session = Depends(get_exp_db)):
+    try:
+        return merchants.apply_groups(db, [i.model_dump() for i in body.items])
+    except ValueError as e:
+        raise HTTPException(422, str(e))

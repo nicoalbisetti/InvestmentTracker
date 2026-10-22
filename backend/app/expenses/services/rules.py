@@ -31,7 +31,8 @@ def load_seed_rules(db: Session, path: Optional[pathlib.Path] = None) -> int:
             pattern=item["pattern"], amount_sign=item.get("amount_sign", "any"), set_kind=item["kind"],
             set_category_id=cats[item["category"]] if item.get("category") else None,
             set_entity_id=ents[item["entity"]] if item.get("entity") else None,
-            set_merchant=item.get("merchant"), origin="seed",
+            set_merchant=item.get("merchant"), set_needs_review=bool(item.get("needs_review", False)),
+            origin="seed",
         )
         rule = db.query(ExpRule).filter_by(seed_key=key).first()
         if rule is None:
@@ -73,6 +74,27 @@ def apply_rule_to_pending(db: Session, rule: ExpRule) -> int:
             t.entity_id = rule.set_entity_id
         t.classification_source = "rule"
         t.rule_id = rule.id
-        t.needs_review = sign_inconsistent(t.kind, t.amount)
+        t.needs_review = sign_inconsistent(t.kind, t.amount) or bool(rule.set_needs_review)
     db.commit()
     return len(txs)
+
+
+def reclassify_pending(db: Session) -> dict:
+    """Vuelve a pasar por las reglas vigentes las filas pendientes (nunca las manuales). Sólo cambia las que
+    ahora matchean alguna regla o identificador propio; el resto queda como estaba."""
+    from app.expenses.services.classifier import Classifier
+    clf = Classifier(db)
+    changed = resolved = 0
+    q = db.query(ExpTransaction).filter(
+        ExpTransaction.needs_review.is_(True), ExpTransaction.classification_source != "manual")
+    for t in q:
+        c = clf.classify(t.account_id, t.description_raw, t.counterparty, t.amount)
+        if c.classification_source == "default":
+            continue
+        t.kind, t.category_id, t.entity_id = c.kind, c.category_id, c.entity_id
+        t.merchant_normalized, t.classification_source, t.rule_id = c.merchant_normalized, c.classification_source, c.rule_id
+        t.needs_review = c.needs_review
+        changed += 1
+        resolved += 0 if c.needs_review else 1
+    db.commit()
+    return {"reclassified": changed, "resolved": resolved}
