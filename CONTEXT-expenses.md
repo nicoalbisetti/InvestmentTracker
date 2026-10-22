@@ -194,8 +194,9 @@ y ruta en `App.tsx` (únicos archivos de Inversiones tocados).
   extractos) porque las descripciones no dicen a cuál va cada transferencia.
 - La auditoría cruza sólo las custodias de cuentas con `itemizes_investments` (hoy Inter). XP no detalla (aportes por la
   "conta investimento").
-- Sección de dólares de la cuenta Santander AR y AMEX con USD sólo cubiertas por PDF sintéticos (los extractos reales
-  no traen movimientos en esos casos).
+- Sección en dólares de la cuenta Santander AR y consumos en USD de AMEX: no se usan (los 6 extractos reales dicen "sin movimientos en dólares"
+  y las tarjetas no se usan en dólares). El código existe pero sólo está cubierto por PDF sintéticos; si algún día aparece un caso real y
+  los controles de saldo no cierran, el import exige `force`.
 - Sin clasificar: transferencias a personas (AR) en su mayoría; se resuelven con tu criterio en Revisar.
 - Spec no implementada: sólo la v2 (proyecciones, anomalías, cruces con Inversiones), fuera de alcance.
 - La base **demo** de gastos usa siempre `rules.example.json` (nunca `rules.local.json`) y `seed_demo` descarta todas sus reglas al regenerar.
